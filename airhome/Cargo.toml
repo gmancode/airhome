@@ -1,0 +1,27 @@
+[package]
+name = "airhome"
+version = "0.9.8"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Stream Windows system audio to HomePod over AirPlay 2"
+
+[dependencies]
+airplay-client = { path = "../airplay2-rs/crates/airplay-client" }
+airplay-core = { path = "../airplay2-rs/crates/airplay-core" }
+airplay-audio = { path = "../airplay2-rs/crates/airplay-audio" }
+anyhow = "1"
+cpal = "0.15"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.37"
+tray-icon = "0.26.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+winreg = "0.56.0"
+windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_Foundation", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Threading", "Win32_System_SystemInformation"] }
+tauri-winrt-notification = "0.8.1"
+
+[build-dependencies]
+winresource = "0.1.34"

@@ -1,0 +1,25 @@
+# --- Rust build output -------------------------------------------------
+/target
+/target-new
+**/*.rs.bk
+*.pdb
+
+# --- Installer output (publish the installer on the Releases page, not in git) ---
+/dist
+
+# --- Logs and local runtime data ---------------------------------------
+*.log
+settings.json
+mute_state.json
+
+# --- Editors and operating system --------------------------------------
+.vscode/
+.idea/
+*.swp
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local scratch -------------------------------------------------------
+/scratch/
