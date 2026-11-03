@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="Логотип airhome">
+  <img src="airhome/docs/logo.png" width="128" alt="Логотип airhome">
 </p>
 
 <h1 align="center">airhome</h1>
@@ -28,9 +28,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/ru-main.png" width="300" alt="Главное окно">
+  <img src="airhome/docs/screenshots/ru-main.png" width="300" alt="Главное окно">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/ru-settings.png" width="300" alt="Настройки">
+  <img src="airhome/docs/screenshots/ru-settings.png" width="300" alt="Настройки">
 </p>
 
 ---
@@ -123,11 +123,11 @@ airhome слушает звук, который играет ваш компью
 ## Логотип
 
 <p align="center">
-  <img src="docs/logo.png" width="96" alt="ожидание">
+  <img src="airhome/docs/logo.png" width="96" alt="ожидание">
   &nbsp;
-  <img src="docs/logo-connecting.png" width="96" alt="подключение">
+  <img src="airhome/docs/logo-connecting.png" width="96" alt="подключение">
   &nbsp;
-  <img src="docs/logo-streaming.png" width="96" alt="трансляция">
+  <img src="airhome/docs/logo-streaming.png" width="96" alt="трансляция">
 </p>
 
 Светящееся кольцо с точкой в центре: звук колонки, расходящийся из одного источника. Кольцо в трее показывает, что
@@ -135,8 +135,8 @@ airhome слушает звук, который играет ваш компью
 
 ## Сборка из исходников
 
-Нужны: Windows, Rust (набор инструментов MSVC). Репозиторий ожидает изменённый `airplay2-rs` рядом с этой папкой
-(`../airplay2-rs`).
+Нужны: Windows, Rust (набор инструментов MSVC). В этом репозитории лежат и приложение (`airhome/`), и изменённая
+библиотека `airplay2-rs` (`airplay2-rs/`), так что ничего больше скачивать не нужно.
 
 ```
 cd airhome
@@ -148,7 +148,7 @@ cargo build --release
 
 ## Лицензия
 
-GPL-3.0-or-later — см. [`LICENSE`](LICENSE) и [`NOTICE.md`](NOTICE.md). Основано на
+GPL-3.0-or-later — см. [`LICENSE`](LICENSE) и [`NOTICE.md`](airhome/NOTICE.md). Основано на
 [airplay2-rs](https://github.com/lmcgartland/airplay2-rs).
 
 «AirPlay», «HomePod» и «Apple» — товарные знаки Apple Inc. airhome — независимый проект, не связан с Apple и не

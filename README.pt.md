@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="Logotipo do airhome">
+  <img src="airhome/docs/logo.png" width="128" alt="Logotipo do airhome">
 </p>
 
 <h1 align="center">airhome</h1>
@@ -28,9 +28,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/pt-main.png" width="300" alt="Janela principal">
+  <img src="airhome/docs/screenshots/pt-main.png" width="300" alt="Janela principal">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/pt-settings.png" width="300" alt="Configurações">
+  <img src="airhome/docs/screenshots/pt-settings.png" width="300" alt="Configurações">
 </p>
 
 ---
@@ -123,11 +123,11 @@ versão x64 roda em ARM pela emulação do Windows, sem teste).
 ## O logotipo
 
 <p align="center">
-  <img src="docs/logo.png" width="96" alt="inativo">
+  <img src="airhome/docs/logo.png" width="96" alt="inativo">
   &nbsp;
-  <img src="docs/logo-connecting.png" width="96" alt="conectando">
+  <img src="airhome/docs/logo-connecting.png" width="96" alt="conectando">
   &nbsp;
-  <img src="docs/logo-streaming.png" width="96" alt="transmitindo">
+  <img src="airhome/docs/logo-streaming.png" width="96" alt="transmitindo">
 </p>
 
 Um anel luminoso com um ponto no centro: o som de um alto-falante irradiando de uma única fonte. O anel acompanha o que o
@@ -135,8 +135,8 @@ airhome está fazendo na bandeja: **azul-violeta** em repouso, **âmbar** ao con
 
 ## Compilar a partir do código-fonte
 
-Requisitos: Windows, Rust (toolchain MSVC). O repositório espera o workspace `airplay2-rs` modificado ao lado desta
-pasta (`../airplay2-rs`).
+Requisitos: Windows, Rust (toolchain MSVC). Este repositório contém tanto o aplicativo (`airhome/`) quanto a
+biblioteca `airplay2-rs` modificada (`airplay2-rs/`), então não é preciso baixar mais nada.
 
 ```
 cd airhome
@@ -148,7 +148,7 @@ O executável é `target\release\airhome.exe`. Para criar o instalador, instale 
 
 ## Licença
 
-GPL-3.0-or-later — veja [`LICENSE`](LICENSE) e [`NOTICE.md`](NOTICE.md). Baseado em
+GPL-3.0-or-later — veja [`LICENSE`](LICENSE) e [`NOTICE.md`](airhome/NOTICE.md). Baseado em
 [airplay2-rs](https://github.com/lmcgartland/airplay2-rs).
 
 "AirPlay", "HomePod" e "Apple" são marcas da Apple Inc. O airhome é um projeto independente, sem afiliação nem

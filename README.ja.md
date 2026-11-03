@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="airhome のロゴ">
+  <img src="airhome/docs/logo.png" width="128" alt="airhome のロゴ">
 </p>
 
 <h1 align="center">airhome</h1>
@@ -28,9 +28,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/ja-main.png" width="300" alt="メインウィンドウ">
+  <img src="airhome/docs/screenshots/ja-main.png" width="300" alt="メインウィンドウ">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/ja-settings.png" width="300" alt="設定">
+  <img src="airhome/docs/screenshots/ja-settings.png" width="300" alt="設定">
 </p>
 
 ---
@@ -122,11 +122,11 @@ Windows 11 と HomePod mini で開発・テストしています。Windows 10 �
 ## ロゴについて
 
 <p align="center">
-  <img src="docs/logo.png" width="96" alt="待機中">
+  <img src="airhome/docs/logo.png" width="96" alt="待機中">
   &nbsp;
-  <img src="docs/logo-connecting.png" width="96" alt="接続中">
+  <img src="airhome/docs/logo-connecting.png" width="96" alt="接続中">
   &nbsp;
-  <img src="docs/logo-streaming.png" width="96" alt="ストリーミング中">
+  <img src="airhome/docs/logo-streaming.png" width="96" alt="ストリーミング中">
 </p>
 
 中心に点がある光るリング：ひとつの音源から広がるスピーカーの音を表しています。トレイのリングの色は airhome の状態を示します：
@@ -134,7 +134,8 @@ Windows 11 と HomePod mini で開発・テストしています。Windows 10 �
 
 ## ソースからビルド
 
-必要なもの：Windows、Rust（MSVC ツールチェーン）。このフォルダの隣（`../airplay2-rs`）に、修正済みの `airplay2-rs` ワークスペースが必要です。
+必要なもの：Windows、Rust（MSVC ツールチェーン）。このリポジトリにはアプリ本体（`airhome/`）と修正済みの `airplay2-rs` ライブラリ
+（`airplay2-rs/`）の両方が含まれているため、ほかにダウンロードするものはありません。
 
 ```
 cd airhome
@@ -146,7 +147,7 @@ cargo build --release
 
 ## ライセンス
 
-GPL-3.0-or-later。[`LICENSE`](LICENSE) と [`NOTICE.md`](NOTICE.md) を参照してください。
+GPL-3.0-or-later。[`LICENSE`](LICENSE) と [`NOTICE.md`](airhome/NOTICE.md) を参照してください。
 [airplay2-rs](https://github.com/lmcgartland/airplay2-rs) をベースにしています。
 
 「AirPlay」「HomePod」「Apple」は Apple Inc. の商標です。airhome は独立したプロジェクトであり、Apple との提携や Apple による承認はありません。

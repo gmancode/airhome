@@ -57,7 +57,7 @@ Name: "autostart"; Description: "{cm:Autostart}"; GroupDescription: "{cm:Additio
 Source: "{#ExeDir}\airhome.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\NOTICE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; The Start-menu shortcut carries the AppUserModelID that gives notifications the name and icon "airhome".

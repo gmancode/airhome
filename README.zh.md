@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="airhome 标志">
+  <img src="airhome/docs/logo.png" width="128" alt="airhome 标志">
 </p>
 
 <h1 align="center">airhome</h1>
@@ -28,9 +28,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/zh-main.png" width="300" alt="主窗口">
+  <img src="airhome/docs/screenshots/zh-main.png" width="300" alt="主窗口">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/zh-settings.png" width="300" alt="设置">
+  <img src="airhome/docs/screenshots/zh-settings.png" width="300" alt="设置">
 </p>
 
 ---
@@ -114,11 +114,11 @@ airhome 监听电脑正在播放的声音，进行无损压缩和加密，再通
 ## 关于标志
 
 <p align="center">
-  <img src="docs/logo.png" width="96" alt="空闲">
+  <img src="airhome/docs/logo.png" width="96" alt="空闲">
   &nbsp;
-  <img src="docs/logo-connecting.png" width="96" alt="连接中">
+  <img src="airhome/docs/logo-connecting.png" width="96" alt="连接中">
   &nbsp;
-  <img src="docs/logo-streaming.png" width="96" alt="串流中">
+  <img src="airhome/docs/logo-streaming.png" width="96" alt="串流中">
 </p>
 
 一个中心带圆点的发光圆环：扬声器的声音从同一个声源向外扩散。托盘中的圆环颜色反映 airhome 的状态：空闲时为**蓝紫色**，
@@ -126,7 +126,8 @@ airhome 监听电脑正在播放的声音，进行无损压缩和加密，再通
 
 ## 从源码构建
 
-要求：Windows、Rust（MSVC 工具链）。仓库需要把修改过的 `airplay2-rs` 工作区放在本文件夹旁边（`../airplay2-rs`）。
+要求：Windows、Rust（MSVC 工具链）。本仓库同时包含应用程序（`airhome/`）和修改过的 `airplay2-rs` 库（`airplay2-rs/`），
+无需再下载其他内容。
 
 ```
 cd airhome
@@ -138,7 +139,7 @@ cargo build --release
 
 ## 许可证
 
-GPL-3.0-or-later，详见 [`LICENSE`](LICENSE) 和 [`NOTICE.md`](NOTICE.md)。基于
+GPL-3.0-or-later，详见 [`LICENSE`](LICENSE) 和 [`NOTICE.md`](airhome/NOTICE.md)。基于
 [airplay2-rs](https://github.com/lmcgartland/airplay2-rs)。
 
 “AirPlay”“HomePod”和“Apple”是 Apple Inc. 的商标。airhome 是独立项目，与 Apple 无关联，也未获得 Apple 认可。
