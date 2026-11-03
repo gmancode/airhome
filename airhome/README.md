@@ -79,7 +79,7 @@ clock so they play in sync. To avoid doubled sound, the PC's own output is muted
 
 ## Install
 
-1. Download **`airhome-setup-<version>.exe`** from the *Releases* page and run it (no administrator rights needed).
+1. Download **`airhome-setup-<version>.exe`** from the [*Releases*](https://github.com/gmancode/airhome/releases/latest) page and run it (no administrator rights needed).
 2. Pick your language and the shortcuts you want. A Start menu entry is always created.
 3. Allow airhome through **Windows Firewall** for private networks when asked — otherwise there is no sound.
 

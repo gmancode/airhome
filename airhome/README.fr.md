@@ -79,7 +79,7 @@ jouent en synchronisation. Pour éviter le son en double, la sortie propre du PC
 
 ## Installation
 
-1. Téléchargez **`airhome-setup-<version>.exe`** depuis la page *Releases* et lancez-le (droits administrateur inutiles).
+1. Téléchargez **`airhome-setup-<version>.exe`** depuis la page [*Releases*](https://github.com/gmancode/airhome/releases/latest) et lancez-le (droits administrateur inutiles).
 2. Choisissez la langue et les raccourcis voulus. Une entrée du menu Démarrer est toujours créée.
 3. Quand il le demande, autorisez airhome dans le **Pare-feu Windows** pour les réseaux privés, sinon il n'y aura pas de son.
 

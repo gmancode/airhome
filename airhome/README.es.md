@@ -79,7 +79,7 @@ sincronía. Para evitar el sonido duplicado, la salida propia del PC se silencia
 
 ## Instalación
 
-1. Descarga **`airhome-setup-<versión>.exe`** desde la página *Releases* y ejecútalo (no requiere administrador).
+1. Descarga **`airhome-setup-<versión>.exe`** desde la página [*Releases*](https://github.com/gmancode/airhome/releases/latest) y ejecútalo (no requiere administrador).
 2. Elige el idioma y los accesos directos que quieras. La entrada del menú Inicio se crea siempre.
 3. Cuando lo pida, permite airhome en el **Firewall de Windows** para redes privadas; si no, no habrá sonido.
 

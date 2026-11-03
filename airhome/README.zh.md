@@ -74,7 +74,7 @@ airhome 监听电脑正在播放的声音，进行无损压缩和加密，再通
 
 ## 安装
 
-1. 在 *Releases* 页面下载 **`airhome-setup-<版本>.exe`** 并运行（无需管理员权限）。
+1. 在 [*Releases*](https://github.com/gmancode/airhome/releases/latest) 页面下载 **`airhome-setup-<版本>.exe`** 并运行（无需管理员权限）。
 2. 选择语言和需要的快捷方式。开始菜单项总是会创建。
 3. 被询问时，请在 **Windows 防火墙** 中允许 airhome 访问专用网络，否则没有声音。
 

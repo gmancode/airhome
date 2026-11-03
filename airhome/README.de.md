@@ -80,7 +80,7 @@ des Streams stummgeschaltet.
 
 ## Installation
 
-1. Lade **`airhome-setup-<Version>.exe`** von der Seite *Releases* herunter und starte sie (keine Administratorrechte nötig).
+1. Lade **`airhome-setup-<Version>.exe`** von der Seite [*Releases*](https://github.com/gmancode/airhome/releases/latest) herunter und starte sie (keine Administratorrechte nötig).
 2. Wähle Sprache und gewünschte Verknüpfungen. Ein Startmenü-Eintrag wird immer angelegt.
 3. Erlaube airhome in der **Windows-Firewall** für private Netzwerke, wenn danach gefragt wird – sonst gibt es keinen Ton.
 

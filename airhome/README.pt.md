@@ -79,7 +79,7 @@ relógio e tocam em sincronia. Para evitar som duplicado, a saída do próprio P
 
 ## Instalação
 
-1. Baixe **`airhome-setup-<versão>.exe`** na página *Releases* e execute (não precisa de administrador).
+1. Baixe **`airhome-setup-<versão>.exe`** na página [*Releases*](https://github.com/gmancode/airhome/releases/latest) e execute (não precisa de administrador).
 2. Escolha o idioma e os atalhos desejados. A entrada no menu Iniciar é sempre criada.
 3. Quando solicitado, permita o airhome no **Firewall do Windows** para redes privadas; caso contrário, não haverá som.
 
