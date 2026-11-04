@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/versão-0.9.8-0A84FF" alt="versão">
+  <img src="https://img.shields.io/badge/versão-0.9.13-0A84FF" alt="versão">
   <img src="https://img.shields.io/badge/plataforma-Windows%2010%20%7C%2011-0078D4" alt="plataforma">
   <img src="https://img.shields.io/badge/licença-GPL--3.0--or--later-blue" alt="licença">
   <img src="https://img.shields.io/badge/escrito%20em-Rust-orange" alt="Rust">

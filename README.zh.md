@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-0.9.8-0A84FF" alt="版本">
+  <img src="https://img.shields.io/badge/版本-0.9.13-0A84FF" alt="版本">
   <img src="https://img.shields.io/badge/平台-Windows%2010%20%7C%2011-0078D4" alt="平台">
   <img src="https://img.shields.io/badge/许可证-GPL--3.0--or--later-blue" alt="许可证">
   <img src="https://img.shields.io/badge/使用-Rust-orange" alt="Rust">

@@ -232,6 +232,25 @@ pub struct Connection {
     stream_stats: Arc<crate::stats::StreamStats>,
 }
 
+/// Background tasks must never outlive the connection. A tokio task that is merely dropped keeps running, and
+/// the PTP task holds UDP ports 319/320: if a connection attempt is abandoned half-way (cancelled or timed out)
+/// without `disconnect()`, the next connection can no longer bind those ports, the speaker's clock sync goes to a
+/// dead socket and the stream plays silence. Abort everything here so cleanup is guaranteed.
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.control_stop.store(true, Ordering::Release);
+        if let Some(t) = self.timing_task.take() {
+            t.abort();
+        }
+        if let Some(t) = self.ptp_master_sync_task.take() {
+            t.abort();
+        }
+        if let Some(t) = self.control_task.take() {
+            t.abort();
+        }
+    }
+}
+
 impl Connection {
     /// Create new connection to device.
     pub async fn connect(device: Device, config: StreamConfig) -> Result<Self> {
@@ -1567,8 +1586,10 @@ impl Connection {
                 Err(e)
             }
             Err(_) => {
-                tracing::debug!("Feedback request timed out");
-                Ok(()) // Don't fail on timeout - it's just a keepalive
+                // A speaker that stops answering is a dead session. Report it so the caller can count it
+                // (the app reconnects after a few in a row); one-off slowness is absorbed by that threshold.
+                tracing::warn!("Feedback request timed out");
+                Err(CoreError::Timeout)
             }
         }
     }

@@ -117,6 +117,12 @@ impl Drop for Muter {
 
 /// Call at startup: if a previous run died while the PC was muted, undo it.
 pub fn recover() {
+    // COM is initialised per thread, and this runs on the main thread BEFORE the window exists: the window
+    // library needs single-threaded COM there, so touching COM here would crash the launch. Use a helper thread.
+    let _ = std::thread::spawn(recover_inner).join();
+}
+
+fn recover_inner() {
     let Ok(text) = std::fs::read_to_string(state_path()) else { return };
     let Ok(state) = serde_json::from_str::<SavedState>(&text) else {
         let _ = std::fs::remove_file(state_path());

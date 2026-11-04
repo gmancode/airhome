@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "airhome"
-version = "0.9.8"
+version = "0.9.13"
 dependencies = [
  "airplay-audio",
  "airplay-client",

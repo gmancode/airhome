@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/バージョン-0.9.8-0A84FF" alt="バージョン">
+  <img src="https://img.shields.io/badge/バージョン-0.9.13-0A84FF" alt="バージョン">
   <img src="https://img.shields.io/badge/プラットフォーム-Windows%2010%20%7C%2011-0078D4" alt="プラットフォーム">
   <img src="https://img.shields.io/badge/ライセンス-GPL--3.0--or--later-blue" alt="ライセンス">
   <img src="https://img.shields.io/badge/使用言語-Rust-orange" alt="Rust">

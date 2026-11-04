@@ -132,19 +132,28 @@ impl RtspConnection {
         stream.flush().await?;
         tracing::debug!("Wire data sent and flushed");
 
-        // Read response
-        let response_data = if self.cipher.is_some() {
-            timeout(std::time::Duration::from_secs(10), self.read_encrypted_response())
-                .await
-                .map_err(|_| CoreError::Timeout)??
-        } else {
-            timeout(std::time::Duration::from_secs(10), self.read_plaintext_response())
-                .await
-                .map_err(|_| CoreError::Timeout)??
+        // Read response. A reply to an EARLIER request (one we gave up waiting for) may still be queued in
+        // the socket; if we kept it, every later reply would be off by one forever. Skip such stale replies.
+        let mut stale = 0;
+        let response = loop {
+            let response_data = if self.cipher.is_some() {
+                timeout(std::time::Duration::from_secs(10), self.read_encrypted_response())
+                    .await
+                    .map_err(|_| CoreError::Timeout)??
+            } else {
+                timeout(std::time::Duration::from_secs(10), self.read_plaintext_response())
+                    .await
+                    .map_err(|_| CoreError::Timeout)??
+            };
+            let r = RtspResponse::parse(&response_data)?;
+            match r.cseq() {
+                Some(c) if c < cseq && stale < 8 => {
+                    stale += 1;
+                    tracing::debug!("skipping stale RTSP reply (cseq={c}, waiting for {cseq})");
+                }
+                _ => break r,
+            }
         };
-
-        // Parse response
-        let response = RtspResponse::parse(&response_data)?;
         tracing::debug!(
             "RTSP <- {} {} (cseq={:?})",
             response.status_code,

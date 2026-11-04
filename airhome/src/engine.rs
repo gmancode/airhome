@@ -137,6 +137,11 @@ impl CaptureGuard {
             let _ = h.join();
         }
     }
+
+    /// The capture thread ended on its own (lost device, stream error): no audio will ever arrive again.
+    fn is_dead(&self) -> bool {
+        self.handle.as_ref().map_or(false, |h| h.is_finished())
+    }
 }
 
 /// Mute the PC's own output (so only the speaker plays). Failure is not fatal: the stream still works.
@@ -454,6 +459,7 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                         continue;
                     }
                     let name = group.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(" + ");
+                    tracing::info!("start requested: {name}");
                     n.status(Status::Connecting(name.clone()));
                     let src = match capture::default_output_format() {
                         Ok((_, f)) => f,
@@ -479,15 +485,23 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                         Attempt::Connected(s) => {
                             session = Some(s);
                             prio::process_boost(true);
+                            tracing::info!("streaming: {name}");
                             n.status(Status::Streaming(name));
                         }
-                        Attempt::Failed(e) => n.status(Status::Error(format!("{e}"))),
-                        Attempt::Cancelled => n.status(Status::Idle),
+                        Attempt::Failed(e) => {
+                            tracing::warn!("connect failed: {e}");
+                            n.status(Status::Error(format!("{e}")))
+                        }
+                        Attempt::Cancelled => {
+                            tracing::info!("connect cancelled");
+                            n.status(Status::Idle)
+                        }
                         Attempt::Quit => break 'main,
                     }
                 }
                 Cmd::Stop => {
                     if let Some(s) = session.take() {
+                        tracing::info!("stop requested");
                         n.status(Status::Stopping);
                         s.shutdown().await;
                         prio::process_boost(false);
@@ -518,11 +532,16 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
             },
             Wake::Feedback => {
                 let failed = match session.as_mut() {
+                    Some(s) if s.capture.is_dead() => {
+                        tracing::warn!("audio capture stopped; rebuilding the stream");
+                        true
+                    }
                     Some(s) => {
                         // Healthy only if every speaker of the group answers.
                         let mut all_ok = true;
                         for c in &mut s.conns {
-                            if c.send_feedback().await.is_err() {
+                            if let Err(e) = c.send_feedback().await {
+                                tracing::warn!("keepalive failed ({}/3): {e}", s.feedback_failures + 1);
                                 all_ok = false;
                             }
                         }
@@ -537,6 +556,7 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                     None => false,
                 };
                 if failed {
+                    tracing::warn!("stream lost; reconnecting");
                     if let Some(s) = session.take() {
                         s.shutdown().await;
                     }
@@ -574,8 +594,12 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                         }
                     }
                     match outcome {
-                        None => n.status(Status::Streaming(name)),
+                        None => {
+                            tracing::info!("reconnected: {name}");
+                            n.status(Status::Streaming(name))
+                        }
                         Some(s) => {
+                            tracing::warn!("reconnect gave up");
                             prio::process_boost(false);
                             n.status(s);
                         }
@@ -585,6 +609,7 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
         }
     }
 
+    tracing::info!("engine exiting");
     if let Some(s) = session.take() {
         s.shutdown().await;
     }

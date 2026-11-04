@@ -92,7 +92,10 @@ impl Shared {
         if frames == 0 {
             return;
         }
-        self.silence_upto = now;
+        // Advance only by the time the emitted frames really cover. Setting this to `now` threw away the
+        // fraction of a frame on every 5 ms tick, so during long silence the stream fell behind the wall clock
+        // (~0.2 %: half a second after 5 minutes). The speaker then got packets whose play time had passed.
+        self.silence_upto = from + Duration::from_secs_f64(frames as f64 / rate as f64);
         self.chunker.push(vec![0i16; frames * 2]);
     }
 }
@@ -118,7 +121,7 @@ pub fn spawn_loopback_capture(
         crate::prio::audio_thread();
         let host = cpal::default_host();
         let Some(device) = host.default_output_device() else {
-            eprintln!("capture: no default output device");
+            tracing::warn!("capture: no default output device");
             return;
         };
         let config = cpal::StreamConfig {
@@ -126,7 +129,17 @@ pub fn spawn_loopback_capture(
             sample_rate: cpal::SampleRate(fmt.rate),
             buffer_size: cpal::BufferSize::Default,
         };
-        let err_fn = |e| eprintln!("capture stream error: {e}");
+        // A capture stream that errors (device unplugged, format changed, driver reset) never recovers by itself.
+        // Remember it so the thread ends and the engine can rebuild the whole session.
+        let broken = Arc::new(AtomicBool::new(false));
+        let err_fn = {
+            let broken = broken.clone();
+            move |e| {
+                tracing::warn!("capture stream error: {e}");
+                broken.store(true, Ordering::Relaxed);
+            }
+        };
+        let device_name = device.name().unwrap_or_default();
 
         let shared = Arc::new(Mutex::new(Shared {
             chunker: Chunker::new(senders, fmt.rate),
@@ -162,7 +175,7 @@ pub fn spawn_loopback_capture(
                 )
             }
             other => {
-                eprintln!("capture: unsupported sample format {other:?}");
+                tracing::warn!("capture: unsupported sample format {other:?}");
                 return;
             }
         };
@@ -170,17 +183,31 @@ pub fn spawn_loopback_capture(
         match stream {
             Ok(stream) => {
                 if let Err(e) = stream.play() {
-                    eprintln!("capture: play failed: {e}");
+                    tracing::warn!("capture: play failed: {e}");
                     return;
                 }
                 // WASAPI loopback delivers nothing while the PC is silent. A real-time AirPlay
                 // stream must never stall, so fill the gaps with digital silence.
+                let mut last_check = Instant::now();
                 while !stop.load(Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_millis(5));
                     shared.lock().unwrap().fill_silence(fmt.rate);
+                    if broken.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // Windows switched the default output (monitor/headset slept or woke, device replaced):
+                    // the loopback we hold is now attached to a device nobody plays on.
+                    if last_check.elapsed() >= Duration::from_secs(2) {
+                        last_check = Instant::now();
+                        let now = host.default_output_device().and_then(|d| d.name().ok()).unwrap_or_default();
+                        if now != device_name {
+                            tracing::warn!("default output changed ({device_name} -> {now}); capture ends");
+                            break;
+                        }
+                    }
                 }
             }
-            Err(e) => eprintln!("capture: build stream failed: {e}"),
+            Err(e) => tracing::warn!("capture: build stream failed: {e}"),
         }
     })
 }

@@ -145,14 +145,38 @@ fn tray_labels(l: Lang) -> TrayLabels<'static> {
     }
 }
 
+/// Log timestamps in local time with the UTC offset, e.g. `2026-11-04 19:55:27.123 +03:00`.
+struct LocalTime;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTime {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        use windows::Win32::System::SystemInformation::GetLocalTime;
+        use windows::Win32::System::Time::GetTimeZoneInformation;
+        let t = unsafe { GetLocalTime() };
+        let mut tz = windows::Win32::System::Time::TIME_ZONE_INFORMATION::default();
+        let id = unsafe { GetTimeZoneInformation(&mut tz) };
+        // Bias is minutes to ADD to local time to get UTC; daylight time has an extra bias.
+        let bias = tz.Bias + if id == 2 { tz.DaylightBias } else { 0 };
+        let off = -bias;
+        let sign = if off < 0 { '-' } else { '+' };
+        write!(
+            w,
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03} {}{:02}:{:02}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds,
+            sign, off.abs() / 60, off.abs() % 60
+        )
+    }
+}
+
 fn init_logging() {
     // Library warnings (per-packet jitter) are very chatty; keep only real problems by default.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "warn,airplay_audio=error".into());
+        .unwrap_or_else(|_| "warn,airhome=info,airplay_audio=error".into());
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_ansi(false)
+        .with_timer(LocalTime)
         .with_writer(Mutex::new(DailyLog::new(settings::log_dir())))
         .init();
     tracing::warn!("---- airhome v{} started ----", env!("CARGO_PKG_VERSION"));
