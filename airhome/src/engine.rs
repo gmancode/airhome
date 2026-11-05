@@ -1,6 +1,6 @@
 //! Background worker: discovery, connection and streaming. Talks to the UI over channels.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -47,6 +47,9 @@ pub enum Status {
     Streaming(String),
     /// The stream dropped; trying to get it back (attempt number, 1-based).
     Reconnecting(String, u32),
+    /// "Disconnect when silent" is on: nothing played for a while, the connection was released and
+    /// the stream comes back by itself when sound returns.
+    Standby(String),
     Stopping,
     /// Keep-alive failed repeatedly; the stream was torn down.
     ConnectionLost,
@@ -161,6 +164,9 @@ struct Session {
     conns: Vec<Connection>,
     capture: CaptureGuard,
     feedback_failures: u32,
+    /// Wall-clock time of the previous keep-alive tick. A big jump means the PC slept (monotonic timers
+    /// may not count sleep) or was frozen, and the speaker has probably dropped the session meanwhile.
+    last_tick: std::time::SystemTime,
     /// Present while the PC's output device is muted by us.
     muter: Option<crate::pcmute::Muter>,
 }
@@ -228,7 +234,13 @@ async fn start_session(devices: Vec<Device>, volumes: Vec<f32>, src: SourceForma
         audio_format,
         timing_protocol: TimingProtocol::Ptp,
         ptp_mode: PtpMode::Master,
-        latency_min: 22050,
+        // The speaker plays each packet this long after it was timestamped: this (not our buffer) is the biggest part
+        // of the delay behind the picture. Chosen by the Music/Video/Games mode; `AIRHOME_LATENCY_MIN`
+        // (samples at 44.1 kHz) overrides it for experiments.
+        latency_min: std::env::var("AIRHOME_LATENCY_MIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| LATENCY_MIN_SAMPLES.load(Ordering::Relaxed)),
         latency_max: 88200,
         supports_dynamic_stream_id: true,
         asc,
@@ -259,6 +271,8 @@ async fn start_session(devices: Vec<Device>, volumes: Vec<f32>, src: SourceForma
         decoders.push(decoder);
     }
     let stop = Arc::new(AtomicBool::new(false));
+    // A stream that has just started counts as "sound heard", so standby never fires right after a connect.
+    capture::mark_sound();
     let handle = capture::spawn_loopback_capture(senders, src, stop.clone());
     let mut capture = CaptureGuard { stop, handle: Some(handle) };
     for (conn, decoder) in conns.iter_mut().zip(decoders) {
@@ -270,7 +284,8 @@ async fn start_session(devices: Vec<Device>, volumes: Vec<f32>, src: SourceForma
             return Err(e.into());
         }
     }
-    let mut session = Session { conns, capture, feedback_failures: 0, muter: None };
+    let mut session =
+        Session { conns, capture, feedback_failures: 0, last_tick: std::time::SystemTime::now(), muter: None };
     session.set_volumes(&volumes).await;
     // Only after the stream is really running, so a failed/cancelled connect never silences the PC.
     session.muter = if mute_pc { engage_mute() } else { None };
@@ -281,6 +296,8 @@ async fn start_session(devices: Vec<Device>, volumes: Vec<f32>, src: SourceForma
 enum Wake {
     Cmd(Option<Cmd>),
     Feedback,
+    /// In standby: look whether sound has returned.
+    Monitor,
 }
 
 /// Result of a cancellable connection attempt.
@@ -339,8 +356,86 @@ fn is_transient(msg: &str) -> bool {
     m.contains("timed out") || m.contains("timeout")
 }
 
-/// Delays between reconnect attempts after a dropped stream.
-const RECONNECT_DELAYS: [u64; 5] = [2, 4, 8, 12, 20];
+/// Delays between reconnect attempts after a dropped stream. About two minutes in total: after the PC wakes
+/// from sleep Wi-Fi can take a while, and a restarting HomePod needs a minute or two.
+const RECONNECT_DELAYS: [u64; 8] = [2, 4, 8, 12, 20, 30, 30, 30];
+
+/// Keep-alive ticks come every 4 s; a longer silence than this means the PC was asleep or frozen.
+const RESUME_GAP: Duration = Duration::from_secs(20);
+
+/// Playout latency to ask the speaker for (samples at 44.1 kHz), set from the mode before each connect.
+pub static LATENCY_MIN_SAMPLES: AtomicU32 = AtomicU32::new(22050);
+
+/// "Disconnect when silent" is switched on in the settings.
+pub static SILENCE_STANDBY: AtomicBool = AtomicBool::new(false);
+
+/// How long the PC must stay silent before the connection is released. `AIRHOME_STANDBY_SECS` overrides it
+/// (for testing).
+fn standby_after() -> Duration {
+    let secs = std::env::var("AIRHOME_STANDBY_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    Duration::from_secs(secs)
+}
+
+/// Delays before the attempts to come back from standby: the first one at once, sound is already playing.
+const STANDBY_RESUME_DELAYS: [u64; 6] = [0, 3, 6, 12, 20, 30];
+
+/// Standby: no connection, only a capture without any speaker that notices when sound returns.
+struct Standby {
+    monitor: CaptureGuard,
+    /// `capture::clock_ms()` when standby began; sound after this moment wakes the stream.
+    since_ms: u64,
+}
+
+fn start_monitor() -> Option<CaptureGuard> {
+    let (_, src) = capture::default_output_format().ok()?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let handle = capture::spawn_loopback_capture(Vec::new(), src, stop.clone());
+    Some(CaptureGuard { stop, handle: Some(handle) })
+}
+
+/// How an attempt to get a stream back ended.
+enum Reconnect {
+    Back(Session),
+    Stopped,
+    GaveUp,
+    Quit,
+}
+
+/// Try to bring a stream back, waiting `delays[i]` seconds before attempt `i`. Stop/Quit interrupt it.
+async fn reconnect(
+    cmd_rx: &mut UnboundedReceiver<Cmd>,
+    n: &Notifier,
+    group: &[Device],
+    volumes: &[f32],
+    mute_pc: bool,
+    name: &str,
+    delays: &[u64],
+    resuming: bool,
+) -> Reconnect {
+    for (i, delay) in delays.iter().enumerate() {
+        n.status(if resuming {
+            Status::Connecting(name.to_string())
+        } else {
+            Status::Reconnecting(name.to_string(), i as u32 + 1)
+        });
+        match pause_cancellable(cmd_rx, Duration::from_secs(*delay)).await {
+            Some(Attempt::Quit) => return Reconnect::Quit,
+            Some(_) => return Reconnect::Stopped,
+            None => {}
+        }
+        let Ok((_, src)) = capture::default_output_format() else {
+            tracing::warn!("reconnect attempt {}: no sound output device yet", i + 1);
+            continue;
+        };
+        match connect_cancellable(cmd_rx, group.to_vec(), volumes.to_vec(), src, mute_pc).await {
+            Attempt::Connected(s) => return Reconnect::Back(s),
+            Attempt::Failed(e) => tracing::warn!("reconnect attempt {} failed: {e}", i + 1),
+            Attempt::Cancelled => return Reconnect::Stopped,
+            Attempt::Quit => return Reconnect::Quit,
+        }
+    }
+    Reconnect::GaveUp
+}
 
 /// A speaker given only by IP address: pretend to be what a HomePod advertises. The real capabilities are
 /// negotiated during the handshake, so this is enough to connect.
@@ -429,6 +524,8 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
     /// What the current/last stream was started with, so it can be re-established.
     let mut last: Option<(Vec<Device>, Vec<f32>, bool)> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(4));
+    let mut monitor_tick = tokio::time::interval(Duration::from_millis(500));
+    let mut standby: Option<Standby> = None;
 
     if let Ok((name, f)) = capture::default_output_format() {
         let khz = if f.rate % 1000 == 0 { format!("{}", f.rate / 1000) } else { format!("{:.1}", f.rate as f32 / 1000.0) };
@@ -440,6 +537,7 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
         let wake = tokio::select! {
             cmd = cmd_rx.recv() => Wake::Cmd(cmd),
             _ = tick.tick(), if session.is_some() => Wake::Feedback,
+            _ = monitor_tick.tick(), if standby.is_some() => Wake::Monitor,
         };
 
         match wake {
@@ -453,6 +551,9 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                 Cmd::Start { indexes, volumes, mute_pc } => {
                     if session.is_some() {
                         continue;
+                    }
+                    if let Some(mut sb) = standby.take() {
+                        sb.monitor.stop_and_join(); // the user starts by hand: leave standby
                     }
                     let group: Vec<Device> = indexes.iter().filter_map(|&i| devices.get(i).cloned()).collect();
                     if group.is_empty() {
@@ -500,6 +601,11 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                     }
                 }
                 Cmd::Stop => {
+                    if let Some(mut sb) = standby.take() {
+                        tracing::info!("stop requested (was in standby)");
+                        sb.monitor.stop_and_join();
+                        n.status(Status::Idle);
+                    }
                     if let Some(s) = session.take() {
                         tracing::info!("stop requested");
                         n.status(Status::Stopping);
@@ -531,12 +637,40 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                 Cmd::Quit => break,
             },
             Wake::Feedback => {
+                // "Disconnect when silent": nothing played for a long while, so let the speaker go. A capture
+                // without a speaker keeps listening and brings the stream back when sound returns.
+                if session.is_some() && last.is_some() && SILENCE_STANDBY.load(Ordering::Relaxed) && capture::silent_for() >= standby_after() {
+                    if let (Some(s), Some((group, _, _))) = (session.take(), last.as_ref()) {
+                        let name = group.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(" + ");
+                        tracing::info!("silence for {} s; standby: {name}", capture::silent_for().as_secs());
+                        let since_ms = capture::clock_ms();
+                        s.shutdown().await;
+                        prio::process_boost(false);
+                        match start_monitor() {
+                            Some(monitor) => {
+                                standby = Some(Standby { monitor, since_ms });
+                                n.status(Status::Standby(name));
+                            }
+                            None => n.status(Status::Idle),
+                        }
+                        continue;
+                    }
+                }
                 let failed = match session.as_mut() {
                     Some(s) if s.capture.is_dead() => {
                         tracing::warn!("audio capture stopped; rebuilding the stream");
                         true
                     }
                     Some(s) => {
+                        let now = std::time::SystemTime::now();
+                        let gap = now.duration_since(s.last_tick).unwrap_or_default();
+                        s.last_tick = now;
+                        if gap > RESUME_GAP {
+                            // The PC slept or was frozen: don't wait for three failed keep-alives (12+ s of
+                            // silence); one failure is enough to rebuild the stream right away.
+                            tracing::warn!("no keep-alive for {} s (PC sleep?); checking the stream", gap.as_secs());
+                            s.feedback_failures = s.feedback_failures.max(2);
+                        }
                         // Healthy only if every speaker of the group answers.
                         let mut all_ok = true;
                         for c in &mut s.conns {
@@ -567,49 +701,68 @@ async fn worker(mut cmd_rx: UnboundedReceiver<Cmd>, n: Notifier, manual: Vec<Str
                         continue;
                     };
                     let name = group.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(" + ");
-                    let mut outcome: Option<Status> = Some(Status::ConnectionLost);
-                    for (i, delay) in RECONNECT_DELAYS.iter().enumerate() {
-                        n.status(Status::Reconnecting(name.clone(), i as u32 + 1));
-                        match pause_cancellable(&mut cmd_rx, Duration::from_secs(*delay)).await {
-                            Some(Attempt::Quit) => break 'main,
-                            Some(_) => {
-                                outcome = Some(Status::Idle);
-                                break;
-                            }
-                            None => {}
-                        }
-                        let Ok((_, src)) = capture::default_output_format() else { continue };
-                        match connect_cancellable(&mut cmd_rx, group.clone(), volumes.clone(), src, mute_pc).await {
-                            Attempt::Connected(s) => {
-                                session = Some(s);
-                                outcome = None;
-                                break;
-                            }
-                            Attempt::Failed(e) => tracing::warn!("reconnect attempt {} failed: {e}", i + 1),
-                            Attempt::Cancelled => {
-                                outcome = Some(Status::Idle);
-                                break;
-                            }
-                            Attempt::Quit => break 'main,
-                        }
-                    }
-                    match outcome {
-                        None => {
+                    match reconnect(&mut cmd_rx, &n, &group, &volumes, mute_pc, &name, &RECONNECT_DELAYS, false).await {
+                        Reconnect::Back(s) => {
+                            session = Some(s);
                             tracing::info!("reconnected: {name}");
-                            n.status(Status::Streaming(name))
+                            n.status(Status::Streaming(name));
                         }
-                        Some(s) => {
+                        Reconnect::Stopped => {
+                            prio::process_boost(false);
+                            n.status(Status::Idle);
+                        }
+                        Reconnect::GaveUp => {
                             tracing::warn!("reconnect gave up");
                             prio::process_boost(false);
-                            n.status(s);
+                            n.status(Status::ConnectionLost);
                         }
+                        Reconnect::Quit => break 'main,
                     }
+                }
+            }
+            Wake::Monitor => {
+                let Some(sb) = standby.as_mut() else { continue };
+                if sb.monitor.is_dead() {
+                    // The output device changed while we waited: listen on the new one.
+                    sb.monitor.stop_and_join();
+                    match start_monitor() {
+                        Some(m) => sb.monitor = m,
+                        None => continue,
+                    }
+                }
+                if !capture::sound_since(sb.since_ms) {
+                    continue;
+                }
+                let Some(mut sb) = standby.take() else { continue };
+                sb.monitor.stop_and_join();
+                let Some((group, volumes, mute_pc)) = last.clone() else {
+                    n.status(Status::Idle);
+                    continue;
+                };
+                let name = group.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(" + ");
+                tracing::info!("sound is back; leaving standby: {name}");
+                match reconnect(&mut cmd_rx, &n, &group, &volumes, mute_pc, &name, &STANDBY_RESUME_DELAYS, true).await {
+                    Reconnect::Back(s) => {
+                        session = Some(s);
+                        prio::process_boost(true);
+                        tracing::info!("streaming again: {name}");
+                        n.status(Status::Streaming(name));
+                    }
+                    Reconnect::Stopped => n.status(Status::Idle),
+                    Reconnect::GaveUp => {
+                        tracing::warn!("could not leave standby");
+                        n.status(Status::ConnectionLost);
+                    }
+                    Reconnect::Quit => break 'main,
                 }
             }
         }
     }
 
     tracing::info!("engine exiting");
+    if let Some(mut sb) = standby.take() {
+        sb.monitor.stop_and_join();
+    }
     if let Some(s) = session.take() {
         s.shutdown().await;
     }

@@ -1,0 +1,45 @@
+name: Bug report / Сообщить о проблеме
+description: Something does not work (no sound, drops, cannot connect) / Что-то не работает (нет звука, обрывы, не подключается)
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Что произошло?
+      description: What did you do and what did you expect? / Что вы делали и что ожидали?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: airhome version / Версия airhome
+      description: Settings → bottom line, e.g. 0.9.14 / Настройки → нижняя строка
+    validations:
+      required: true
+  - type: input
+    id: speaker
+    attributes:
+      label: Speaker and its software version / Колонка и версия ПО
+      description: e.g. HomePod mini, HomePod software 27.0
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version / Версия Windows
+      description: e.g. Windows 11 24H2
+  - type: dropdown
+    id: when
+    attributes:
+      label: When does it happen? / Когда это происходит?
+      options:
+        - On connect / При подключении
+        - After a pause or idle time / После паузы или простоя
+        - After the PC sleeps / После сна ПК
+        - Randomly while playing / Случайно во время игры звука
+        - Other / Другое
+  - type: markdown
+    attributes:
+      value: |
+        **Please attach the log file / Пожалуйста, приложите файл лога.**
+        airhome → Settings → "Open log folder" → drag the newest `airhome-….log` into this form.
+        airhome → Настройки → «Открыть папку логов» → перетащите самый новый `airhome-….log` в это окно.
+        The log contains your speaker name and local IP address; you may remove those lines. / В логе есть имя колонки и локальный IP, их можно удалить.

@@ -14,6 +14,38 @@ const CHUNK_FRAMES: usize = 1024;
 /// Peak absolute sample (0..=32767) seen since the UI last read it.
 pub static PEAK: AtomicU64 = AtomicU64::new(0);
 
+/// Samples quieter than this (0..=32767, about -60 dBFS) do not count as sound.
+const SOUND_PEAK: u64 = 32;
+
+static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+fn now_ms() -> u64 {
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+/// When (ms since program start) sound was last heard on the default output.
+static LAST_SOUND_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Count "now" as the last time sound was heard (a stream just started).
+pub fn mark_sound() {
+    LAST_SOUND_MS.store(now_ms(), Ordering::Relaxed);
+}
+
+/// How long the PC has been silent.
+pub fn silent_for() -> Duration {
+    Duration::from_millis(now_ms().saturating_sub(LAST_SOUND_MS.load(Ordering::Relaxed)))
+}
+
+/// Current time on the same clock as [`sound_since`], for "has there been sound since X".
+pub fn clock_ms() -> u64 {
+    now_ms()
+}
+
+/// Has sound been heard after the moment `since_ms` (taken from [`clock_ms`])?
+pub fn sound_since(since_ms: u64) -> bool {
+    LAST_SOUND_MS.load(Ordering::Relaxed) > since_ms
+}
+
 /// Source format of the default output device.
 #[derive(Clone, Copy, Debug)]
 pub struct SourceFormat {
@@ -76,6 +108,9 @@ impl Shared {
     fn push_real(&mut self, stereo: Vec<i16>) {
         let peak = stereo.iter().map(|s| s.unsigned_abs() as u64).max().unwrap_or(0);
         PEAK.fetch_max(peak, Ordering::Relaxed);
+        if peak > SOUND_PEAK {
+            mark_sound();
+        }
         self.last_real = Instant::now();
         self.silence_upto = self.last_real;
         self.chunker.push(stereo);

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.9.13-0A84FF" alt="version">
+  <img src="https://img.shields.io/badge/version-0.9.21-0A84FF" alt="version">
   <img src="https://img.shields.io/badge/plateforme-Windows%2010%20%7C%2011-0078D4" alt="plateforme">
   <img src="https://img.shields.io/badge/licence-GPL--3.0--or--later-blue" alt="licence">
   <img src="https://img.shields.io/badge/écrit%20en-Rust-orange" alt="Rust">
@@ -42,8 +42,7 @@ Windows n'a aucun moyen intégré d'envoyer son son vers un HomePod. airhome en 
 - **Un clic, aucun pilote.** Pas de carte son virtuelle, pas de Bonjour, pas d'iTunes. Choisissez une enceinte, connectez.
 - **Le son uniquement où vous le voulez.** Pendant la diffusion, les haut-parleurs du PC sont coupés puis rétablis ensuite
   — même si le programme se ferme de façon inattendue.
-- **Plusieurs enceintes à la fois.** Touchez **+** à côté d'autres enceintes pour jouer sur toutes en synchronisation,
-  chacune avec son propre volume *(expérimental)*.
+- **Plusieurs enceintes à la fois.** Activez *Jouer sur plusieurs enceintes*, cochez celles que vous voulez et elles jouent en synchronisation, chacune avec son propre volume *(expérimental)*.
 - **Dans la zone de notification.** Connectez, déconnectez et réglez le volume depuis le menu, sans ouvrir la fenêtre.
 - **Reste connecté.** Reconnexion automatique après une coupure Wi-Fi, nouvel essai si le démarrage est lent, bouton
   pour annuler une connexion trop longue et notification si un problème survient fenêtre masquée.
@@ -58,7 +57,10 @@ Windows n'a aucun moyen intégré d'envoyer son son vers un HomePod. airhome en 
 | 🔊 **Audio du système** | Capture tout ce que Windows joue (WASAPI loopback) et l'envoie en audio AirPlay 2 chiffré |
 | 🏠 **Compatible HomePod** | Appairage transitoire HomeKit, synchronisation PTP précise, fonctionne avec le HomePod mini |
 | 🎚 **Volume** | Volume général et niveau propre à chaque enceinte ; réglable aussi depuis la zone de notification |
-| ⏱ **Délai réglable** | Tampon de 100 à 2000 ms : plus bas = plus réactif, plus haut = plus stable avec un Wi-Fi faible |
+| 🎛 **Musique / Vidéo / Jeux** | Un interrupteur pour choisir la rapidité de l'enceinte : Musique est le plus stable, Vidéo et Jeux réduisent le délai de plus de moitié (mesuré avec un micro sur un HomePod mini) |
+| ⏱ **Tampon réglable** | Dans *Avancé* : de 100 à 2000 ms, plus bas = plus réactif, plus haut = plus stable avec un Wi-Fi faible |
+| 😴 **Se déconnecter en cas de silence** | En option : après 5 minutes sans son, l'enceinte est libérée et se reconnecte seule quand le son revient |
+| 🩺 **Vérifier la connexion** | Un bouton qui cherche les causes habituelles du silence (type de réseau, programmes qui bloquent la connexion, cartes VPN, ports occupés) et dit quoi changer |
 | 🔌 **Ajout par IP et port** | Pour les réseaux où la détection automatique ne fonctionne pas (VLAN, certains routeurs) |
 | 🔁 **Reconnexion automatique** | Rétablit le flux après une coupure ; la connexion peut être annulée à tout moment |
 | 🔔 **Notifications** | Une notification Windows si une connexion échoue pendant qu'airhome est dans la zone de notification |
@@ -102,7 +104,11 @@ réglé sur « Tout le monde sur le même réseau » et **aucun mot de passe Air
 | Couper le son de ce PC pendant la diffusion | Évite le son en double ; rétabli automatiquement ensuite |
 | Le bouton de fermeture réduit dans la zone de notification | Laisse airhome tourner en arrière-plan |
 | Ajouter une enceinte par adresse IP | Ajoute une enceinte à la main (IP et port facultatif, 7000 par défaut) |
-| Tampon avant la lecture | Curseur de latence, 100–2000 ms (appliqué à la prochaine connexion) |
+| Mode (Musique / Vidéo / Jeux) | La rapidité de l'enceinte ; Vidéo et Jeux réduisent le délai (appliqué à la prochaine connexion) |
+| Se déconnecter en cas de silence | Libère l'enceinte après 5 minutes sans son et se reconnecte quand le son revient |
+| Vérifier la connexion | Teste le réseau, les ports, les cartes VPN et la sortie audio, et peut copier un rapport |
+| Signaler un problème sur GitHub | Ouvre le formulaire ; joignez le journal de *Ouvrir le dossier des journaux* |
+| Tampon avant la lecture (dans Avancé) | Curseur de latence, 100–2000 ms (appliqué à la prochaine connexion) |
 
 ## Conseils
 
@@ -110,8 +116,7 @@ réglé sur « Tout le monde sur le même réseau » et **aucun mot de passe Air
   détection, utilisez *Ajouter une enceinte par adresse IP*.
 - **Pas de son ?** Vérifiez que le Pare-feu Windows autorise airhome sur les réseaux privés et que l'enceinte n'a pas de
   mot de passe AirPlay. Des filtres réseau (par exemple le pilote réseau d'AdGuard) peuvent bloquer la connexion.
-- **Le délai compte (vidéo, jeux) ?** Réduisez le tampon. AirPlay ajoute toujours un peu de délai ; pour une vidéo
-  synchronisée avec l'image, un petit tampon est préférable.
+- **Le délai compte (vidéo, jeux) ?** Choisissez le mode **Vidéo** ou **Jeux** : le délai jusqu'à l'oreille passe d'environ 700 ms à environ 300 et 260 ms (mesuré avec un tampon de 100 ms sur un HomePod mini). Il en reste un peu : dans un lecteur comme VLC ou MPC-HC, avancez le son d'environ cette valeur.
 - **Coupures avec un Wi-Fi faible ?** Augmentez le tampon.
 
 ## État

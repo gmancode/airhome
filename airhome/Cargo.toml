@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "airhome"
-version = "0.9.13"
+version = "0.9.21"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Stream Windows system audio to HomePod over AirPlay 2"
@@ -20,7 +20,7 @@ tray-icon = "0.26.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 winreg = "0.56.0"
-windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_Foundation", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Time"] }
+windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_Foundation", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_System_DataExchange", "Win32_System_Memory"] }
 tauri-winrt-notification = "0.8.1"
 
 [build-dependencies]

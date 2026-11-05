@@ -21,6 +21,10 @@ pub struct Settings {
     pub latency_ms: u32,
     /// Mute this PC's own speakers while streaming, so sound comes only from the HomePod.
     pub mute_pc: bool,
+    /// Disconnect after a few minutes without sound and reconnect when sound returns.
+    pub silence_standby: bool,
+    /// How soon the speaker plays what it receives: 0 = Music (most stable), 1 = Video, 2 = Games (lowest delay).
+    pub latency_mode: u8,
     /// Speakers added by IP address (for networks without working mDNS).
     pub manual_ips: Vec<String>,
     /// Extra speakers (by name) that play together with `device`.
@@ -39,6 +43,8 @@ impl Default for Settings {
             close_to_tray: true,
             latency_ms: 200,
             mute_pc: true,
+            silence_standby: false,
+            latency_mode: 0,
             manual_ips: Vec::new(),
             group: Vec::new(),
             speaker_trim: std::collections::HashMap::new(),
@@ -46,7 +52,27 @@ impl Default for Settings {
     }
 }
 
+/// How long the speaker waits before playing a packet, per mode (Music, Video, Games), in ms.
+/// Measured with a microphone on a HomePod mini: sound reaches the ear about this + our buffer + 100 ms
+/// after the PC played it (500 ms -> 691 ms, 100 ms -> 305 ms, 50 ms -> 260 ms with a 100 ms buffer).
+const SPEAKER_LATENCY_MS: [u32; 3] = [500, 100, 50];
+
 impl Settings {
+    pub fn mode(&self) -> usize {
+        (self.latency_mode as usize).min(SPEAKER_LATENCY_MS.len() - 1)
+    }
+
+    /// The speaker's playout latency for the chosen mode, in samples at 44.1 kHz (what AirPlay negotiates).
+    pub fn speaker_latency_samples(&self) -> u32 {
+        SPEAKER_LATENCY_MS[self.mode()] * 441 / 10
+    }
+
+    /// Rough delay of the sound behind the picture, rounded to 10 ms, for the hint under the mode switch.
+    pub fn estimated_delay_ms(&self) -> u32 {
+        let total = SPEAKER_LATENCY_MS[self.mode()] + self.latency_ms + 100;
+        (total + 5) / 10 * 10
+    }
+
     /// Pre-fill as a percent of the 2000 ms jitter buffer.
     pub fn prefill_percent(&self) -> u32 {
         (self.latency_ms / 20).clamp(5, 100)

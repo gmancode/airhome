@@ -1363,6 +1363,41 @@ pub async fn send_stop_signaling(
     Ok(())
 }
 
+/// One-way clock offset estimator for a PTP slave that gets Sync/Follow_Up but no Delay_Resp.
+///
+/// HomePods act as gPTP masters whose clock is uptime-based and they do not answer our Delay_Req, so the
+/// two-way exchange never completes. Each Sync/Follow_Up pair still gives `t1 - t2` = master minus local
+/// clock minus the one-way network delay. The delay only ever makes the sample smaller, so the largest
+/// sample in a short window is the best estimate. Result: `master_time = local_time + offset`.
+#[derive(Debug, Default)]
+pub struct OneWayEstimator {
+    window: std::collections::VecDeque<i128>,
+    last_sent: Option<i64>,
+}
+
+impl OneWayEstimator {
+    const WINDOW: usize = 32;
+    /// Only report a new offset when it moved by more than this (0.5 ms).
+    const MIN_CHANGE_NS: i64 = 500_000;
+
+    /// Add one Sync/Follow_Up pair (`t1` master send time, `t2` local receive time, both in ns).
+    /// Returns the offset to publish, or `None` when it did not change enough.
+    pub fn push(&mut self, t1_ns: i128, t2_ns: i128) -> Option<i64> {
+        if self.window.len() == Self::WINDOW {
+            self.window.pop_front();
+        }
+        self.window.push_back(t1_ns - t2_ns);
+        let best = i64::try_from(*self.window.iter().max()?).ok()?;
+        match self.last_sent {
+            Some(prev) if (prev - best).abs() <= Self::MIN_CHANGE_NS => None,
+            _ => {
+                self.last_sent = Some(best);
+                Some(best)
+            }
+        }
+    }
+}
+
 /// Run BMCA yield flow: act like a Mac sender.
 ///
 /// 1. Send 3 Syncs + 2 Announces (Priority1=250) + Mac-style Signaling
@@ -1500,6 +1535,12 @@ pub async fn run_bmca_yield_flow(
     let mut t2: Option<PtpTimestamp> = None;
     let mut t3: Option<PtpTimestamp> = None;
     let mut delay_req_seq: u16 = 0;
+    // One-way estimate from Sync/Follow_Up pairs (see `OneWayEstimator`). Set AIRHOME_PTP_OFFSET=off to
+    // fall back to the old behaviour (offset stays zero).
+    let one_way_enabled = std::env::var("AIRHOME_PTP_OFFSET").map(|v| v != "off").unwrap_or(true);
+    let mut estimator = OneWayEstimator::default();
+    let mut last_sync: Option<(u16, PtpTimestamp)> = None;
+    let mut first_estimate_logged = false;
 
     tracing::info!("BMCA: Entering slave loop, syncing to {} (filtering other peers)", master_ip);
 
@@ -1531,6 +1572,7 @@ pub async fn run_bmca_yield_flow(
                             PtpMessageType::Sync => {
                                 sync_count += 1;
                                 t2 = Some(PtpTimestamp::now());
+                                last_sync = t2.map(|ts| (header.sequence_id, ts));
                                 tracing::debug!("BMCA slave: Received Sync #{} from {} (seq={}, len={})",
                                     sync_count, src.ip(), header.sequence_id, len);
                             }
@@ -1546,8 +1588,9 @@ pub async fn run_bmca_yield_flow(
                                             let t3_ns = t3v.to_nanos() as i128;
                                             let t4_ns = t4.to_nanos() as i128;
 
-                                            let offset_val = ((t2_ns - t1_ns) + (t3_ns - t4_ns)) / 2;
-                                            let delay = ((t2_ns - t1_ns) - (t3_ns - t4_ns)) / 2;
+                                            // ClockOffset is "master minus local" (master = local + offset).
+                                            let offset_val = ((t1_ns - t2_ns) + (t4_ns - t3_ns)) / 2;
+                                            let delay = ((t2_ns - t1_ns) + (t4_ns - t3_ns)) / 2;
 
                                             let clock_offset = ClockOffset {
                                                 offset_ns: offset_val as i64,
@@ -1594,6 +1637,21 @@ pub async fn run_bmca_yield_flow(
                                 t1 = Some(ts);
                                 tracing::debug!("BMCA slave: Received Follow_Up #{} from {} (seq={}, t1={}.{:09}s)",
                                     followup_count, src.ip(), header.sequence_id, ts.seconds, ts.nanoseconds);
+
+                                // One-way offset from the matching Sync (same sequence id).
+                                if one_way_enabled {
+                                    if let Some((seq, t2v)) = last_sync {
+                                        if seq == header.sequence_id {
+                                            if let Some(offset_ns) = estimator.push(ts.to_nanos() as i128, t2v.to_nanos() as i128) {
+                                                if !first_estimate_logged {
+                                                    first_estimate_logged = true;
+                                                    tracing::warn!("PTP: clock offset estimated from Sync/Follow_Up: {} ms", offset_ns / 1_000_000);
+                                                }
+                                                let _ = offset_tx.send(ClockOffset { offset_ns, error_ns: 0, rtt_ns: 0 });
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Send Delay_Req
                                 delay_req_seq = delay_req_seq.wrapping_add(1);
@@ -2087,6 +2145,54 @@ pub async fn run_ptp_slave(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod one_way_estimator {
+        use super::*;
+
+        // Master (uptime-based) clock is ~433 324 s, local wall clock ~1.78e9 s.
+        const MASTER: i128 = 433_324_000_000_000;
+        const LOCAL: i128 = 1_780_000_000_000_000_000;
+
+        #[test]
+        fn first_sample_is_reported_and_has_master_minus_local_sign() {
+            let mut e = OneWayEstimator::default();
+            // 2 ms network delay: t2 = true local time of the sync + 2 ms.
+            let offset = e.push(MASTER, LOCAL + 2_000_000).unwrap();
+            assert_eq!(offset as i128, MASTER - LOCAL - 2_000_000);
+            // master = local + offset (within the delay)
+            assert!((LOCAL as i128 + offset as i128 - MASTER).abs() <= 2_000_000);
+        }
+
+        #[test]
+        fn least_delayed_sample_wins() {
+            let mut e = OneWayEstimator::default();
+            e.push(MASTER, LOCAL + 5_000_000); // delayed by 5 ms
+            let best = e.push(MASTER + 1_000_000_000, LOCAL + 1_000_000_000 + 1_000_000); // delayed by 1 ms
+            assert_eq!(best.unwrap() as i128, MASTER - LOCAL - 1_000_000);
+        }
+
+        #[test]
+        fn tiny_changes_are_not_reported() {
+            let mut e = OneWayEstimator::default();
+            assert!(e.push(MASTER, LOCAL).is_some());
+            // 0.2 ms worse: below the 0.5 ms threshold
+            assert!(e.push(MASTER + 1_000_000_000, LOCAL + 1_000_000_000 + 200_000).is_none());
+        }
+
+        #[test]
+        fn old_samples_age_out_of_the_window() {
+            let mut e = OneWayEstimator::default();
+            e.push(MASTER, LOCAL); // delay 0: the best sample
+            // 40 later samples with 3 ms delay push the first one out
+            let mut last = None;
+            for i in 1..=40i128 {
+                if let Some(v) = e.push(MASTER + i * 1_000_000_000, LOCAL + i * 1_000_000_000 + 3_000_000) {
+                    last = Some(v);
+                }
+            }
+            assert_eq!(last.unwrap() as i128, MASTER - LOCAL - 3_000_000);
+        }
+    }
 
     mod ptp_timestamp {
         use super::*;

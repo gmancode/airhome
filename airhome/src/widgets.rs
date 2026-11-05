@@ -610,3 +610,170 @@ pub fn dot(ui: &mut Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.5, color);
 }
+
+// ------------------------------------------------------------------ main screen (redesign)
+
+/// Settings gear: a ring with eight teeth around a small hub.
+pub fn icon_gear(p: &egui::Painter, c: Pos2, color: Color32) {
+    p.circle_stroke(c, 5.6, Stroke::new(1.8, color));
+    p.circle_stroke(c, 2.0, Stroke::new(1.6, color));
+    for k in 0..8 {
+        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+        let (s, co) = a.sin_cos();
+        p.line_segment([pos2(c.x + co * 6.6, c.y + s * 6.6), pos2(c.x + co * 9.0, c.y + s * 9.0)], Stroke::new(2.4, color));
+    }
+}
+
+/// Chevron pointing left ("back").
+pub fn icon_back(p: &egui::Painter, c: Pos2, color: Color32) {
+    p.add(Shape::line(
+        vec![pos2(c.x + 2.5, c.y - 6.0), pos2(c.x - 3.0, c.y), pos2(c.x + 2.5, c.y + 6.0)],
+        Stroke::new(2.0, color),
+    ));
+}
+
+/// Chevron pointing down (an open list).
+fn icon_chevron_down(p: &egui::Painter, c: Pos2, color: Color32) {
+    p.add(Shape::line(
+        vec![pos2(c.x - 5.0, c.y - 2.5), pos2(c.x, c.y + 2.5), pos2(c.x + 5.0, c.y - 2.5)],
+        Stroke::new(1.8, color),
+    ));
+}
+
+/// 34 px round icon button; `back` draws a left chevron, otherwise the settings gear.
+pub fn header_icon_button(ui: &mut Ui, back: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
+    let hovered = resp.hovered();
+    pointer(ui, hovered);
+    let p = ui.painter();
+    if hovered {
+        p.circle_filled(rect.center(), 17.0, hover_fill());
+    }
+    let col = if hovered { TEXT } else { TEXT2 };
+    if back {
+        icon_back(p, rect.center(), col);
+    } else {
+        icon_gear(p, rect.center(), col);
+    }
+    resp.clicked()
+}
+
+/// Header of the speaker card: caption, the chosen speaker's name, an optional refresh button and (when the
+/// list can be opened) a chevron. Returns (header clicked, refresh clicked).
+pub fn speaker_header(
+    ui: &mut Ui,
+    caption: &str,
+    name: &str,
+    is_homepod: bool,
+    chevron: Option<bool>,
+    refresh: Option<bool>,
+) -> (bool, bool) {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 58.0), if chevron.is_some() { Sense::click() } else { Sense::hover() });
+    let mut right = rect.right() - 12.0;
+
+    let mut refresh_clicked = false;
+    let mut refresh_hot = false;
+    let mut chev_center = None;
+    if chevron.is_some() {
+        chev_center = Some(pos2(right - 6.0, rect.center().y));
+        right -= 30.0;
+    }
+    let mut refresh_center = None;
+    if let Some(enabled) = refresh {
+        let center = pos2(right - 14.0, rect.center().y);
+        let hit = Rect::from_center_size(center, vec2(34.0, 34.0));
+        let r = ui.interact(hit, resp.id.with("refresh"), if enabled { Sense::click() } else { Sense::hover() });
+        refresh_hot = enabled && r.hovered();
+        pointer(ui, refresh_hot);
+        refresh_clicked = enabled && r.clicked();
+        refresh_center = Some((center, enabled));
+        right -= 38.0;
+    }
+
+    let hovered = chevron.is_some() && resp.hovered() && !refresh_hot;
+    pointer(ui, hovered);
+    let p = ui.painter().clone();
+    if hovered {
+        p.rect_filled(rect, CornerRadius::same(12), hover_fill());
+    }
+    if let Some((center, enabled)) = refresh_center {
+        if refresh_hot {
+            p.circle_filled(center, 16.0, hover_fill());
+        }
+        icon_refresh(&p, center, if enabled { TEXT } else { Color32::from_gray(90) });
+    }
+    if let (Some(open), Some(c)) = (chevron, chev_center) {
+        if open {
+            icon_chevron_down(&p, c, TEXT2);
+        } else {
+            icon_chevron(&p, c, TEXT2);
+        }
+    }
+
+    let tile = Rect::from_center_size(pos2(rect.left() + 12.0 + 17.0, rect.center().y), vec2(34.0, 34.0));
+    device_tile(&p, tile, is_homepod, true);
+    let text_left = tile.right() + 12.0;
+    let clip = Rect::from_min_max(pos2(text_left, rect.top()), pos2(right.max(text_left + 20.0), rect.bottom()));
+    let pc = p.with_clip_rect(clip);
+    pc.text(pos2(text_left, rect.center().y - 9.0), Align2::LEFT_CENTER, caption, regular(11.5), TEXT2);
+    pc.text(pos2(text_left, rect.center().y + 8.0), Align2::LEFT_CENTER, name, bold(15.0), TEXT);
+    (chevron.is_some() && resp.clicked() && !refresh_clicked, refresh_clicked)
+}
+
+/// One speaker in the list: a round mark when exactly one speaker plays, a checkbox when several play together.
+/// `badge` is a small tag after the name (the main speaker of a group). Returns true when the row was clicked.
+pub fn speaker_row(
+    ui: &mut Ui,
+    name: &str,
+    is_homepod: bool,
+    checked: bool,
+    multi: bool,
+    badge: Option<&str>,
+    enabled: bool,
+) -> bool {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 46.0), if enabled { Sense::click() } else { Sense::hover() });
+    let hovered = enabled && resp.hovered();
+    pointer(ui, hovered);
+    let p = ui.painter().clone();
+    let cr = CornerRadius::same(12);
+    if checked {
+        p.rect_filled(rect, cr, ACCENT.gamma_multiply(0.16));
+    } else if hovered {
+        p.rect_filled(rect, cr, hover_fill());
+    }
+    let tile = Rect::from_center_size(pos2(rect.left() + 12.0 + 15.0, rect.center().y), vec2(30.0, 30.0));
+    device_tile(&p, tile, is_homepod, enabled);
+
+    let text_left = tile.right() + 12.0;
+    let col = if enabled { TEXT } else { TEXT2 };
+    let g = p.layout_no_wrap(name.to_owned(), bold(14.5), col);
+    p.galley(pos2(text_left, rect.center().y - g.size().y * 0.5), g.clone(), col);
+    if let Some(b) = badge {
+        let bg = p.layout_no_wrap(b.to_owned(), regular(11.0), ACCENT);
+        let brect = Rect::from_min_size(
+            pos2(text_left + g.size().x + 8.0, rect.center().y - (bg.size().y + 4.0) * 0.5),
+            vec2(bg.size().x + 12.0, bg.size().y + 4.0),
+        );
+        p.rect_stroke(brect, CornerRadius::same(9), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Inside);
+        p.galley(pos2(brect.left() + 6.0, brect.top() + 2.0), bg, ACCENT);
+    }
+
+    let mark = pos2(rect.right() - 14.0 - 9.0, rect.center().y);
+    if multi {
+        let r = Rect::from_center_size(mark, vec2(18.0, 18.0));
+        if checked {
+            p.rect_filled(r, CornerRadius::same(5), ACCENT);
+            icon_check(&p, mark, Color32::WHITE);
+        } else {
+            p.rect_stroke(r, CornerRadius::same(5), Stroke::new(1.6, TEXT2), StrokeKind::Inside);
+        }
+    } else {
+        p.circle_stroke(mark, 9.0, Stroke::new(1.6, if checked { ACCENT } else { TEXT2 }));
+        if checked {
+            p.circle_filled(mark, 4.5, ACCENT);
+        }
+    }
+    enabled && resp.clicked()
+}

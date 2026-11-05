@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/versión-0.9.13-0A84FF" alt="versión">
+  <img src="https://img.shields.io/badge/versión-0.9.21-0A84FF" alt="versión">
   <img src="https://img.shields.io/badge/plataforma-Windows%2010%20%7C%2011-0078D4" alt="plataforma">
   <img src="https://img.shields.io/badge/licencia-GPL--3.0--or--later-blue" alt="licencia">
   <img src="https://img.shields.io/badge/escrito%20en-Rust-orange" alt="Rust">
@@ -42,8 +42,7 @@ Windows no tiene una forma integrada de enviar su sonido a un HomePod. airhome a
 - **Un clic, sin controladores.** Sin tarjeta de sonido virtual, sin Bonjour, sin iTunes. Elige un altavoz y pulsa conectar.
 - **El sonido solo donde quieres.** Mientras transmite, los altavoces del PC se silencian y se restauran después
   — incluso si el programa se cierra de forma inesperada.
-- **Varios altavoces a la vez.** Pulsa **+** junto a otros altavoces para reproducir en todos en sincronía, cada uno
-  con su propio volumen *(experimental)*.
+- **Varios altavoces a la vez.** Activa *Reproducir en varios altavoces*, marca los que quieras y sonarán en sincronía, cada uno con su propio volumen *(experimental)*.
 - **Vive en la bandeja.** Conecta, desconecta y cambia el volumen desde el menú de la bandeja sin abrir la ventana.
 - **Se mantiene conectado.** Reconexión automática tras un fallo de Wi-Fi, un reintento si el inicio es lento, un botón
   para cancelar una conexión que tarda demasiado y una notificación si algo falla con la ventana oculta.
@@ -58,7 +57,10 @@ Windows no tiene una forma integrada de enviar su sonido a un HomePod. airhome a
 | 🔊 **Audio del sistema** | Captura todo lo que reproduce Windows (WASAPI loopback) y lo envía como audio AirPlay 2 cifrado |
 | 🏠 **Compatible con HomePod** | Emparejamiento transitorio de HomeKit, sincronización PTP precisa, funciona con HomePod mini |
 | 🎚 **Volumen** | Volumen general más un nivel independiente para cada altavoz; también desde la bandeja |
-| ⏱ **Retardo ajustable** | Búfer de 100 a 2000 ms: más bajo es más inmediato, más alto es más estable con Wi-Fi débil |
+| 🎛 **Música / Vídeo / Juegos** | Un interruptor para elegir cuánto tarda el altavoz en sonar: Música es lo más estable, Vídeo y Juegos reducen el retardo a menos de la mitad (medido con un micrófono en un HomePod mini) |
+| ⏱ **Búfer ajustable** | En *Avanzado*: de 100 a 2000 ms, más bajo es más inmediato, más alto es más estable con Wi-Fi débil |
+| 😴 **Desconectar en silencio** | Opcional: tras 5 minutos sin sonido se libera el altavoz y se reconecta solo cuando vuelve el sonido |
+| 🩺 **Comprobar la conexión** | Un botón que busca las causas habituales del silencio (tipo de red, programas que bloquean la conexión, adaptadores VPN, puertos ocupados) y dice qué cambiar |
 | 🔌 **Añadir por IP y puerto** | Para redes donde la detección automática no funciona (VLAN, algunos routers) |
 | 🔁 **Reconexión automática** | Recupera la transmisión tras una caída; la conexión se puede cancelar en cualquier momento |
 | 🔔 **Notificaciones** | Una notificación de Windows si falla una conexión mientras airhome está en la bandeja |
@@ -102,7 +104,11 @@ Requisitos: Windows 10 u 11 (64 bits), un HomePod u otro altavoz AirPlay 2 en la
 | Silenciar los altavoces de este PC durante la transmisión | Evita el sonido duplicado; se restaura solo después |
 | El botón de cierre minimiza a la bandeja | Mantiene airhome en segundo plano |
 | Añadir altavoz por dirección IP | Añade un altavoz a mano (IP y puerto opcional, por defecto 7000) |
-| Búfer antes de reproducir | Control de latencia, 100–2000 ms (se aplica en la siguiente conexión) |
+| Modo (Música / Vídeo / Juegos) | Cuánto tarda el altavoz en sonar; Vídeo y Juegos reducen el retardo (se aplica en la siguiente conexión) |
+| Desconectar en silencio | Libera el altavoz tras 5 minutos sin sonido y se reconecta cuando vuelve el sonido |
+| Comprobar la conexión | Prueba la red, los puertos, los adaptadores VPN y la salida de sonido, y puede copiar un informe |
+| Informar de un problema en GitHub | Abre el formulario; adjunta el registro de *Abrir carpeta de registros* |
+| Búfer antes de reproducir (en Avanzado) | Control de latencia, 100–2000 ms (se aplica en la siguiente conexión) |
 
 ## Consejos
 
@@ -110,8 +116,7 @@ Requisitos: Windows 10 u 11 (64 bits), un HomePod u otro altavoz AirPlay 2 en la
   detección, usa *Añadir altavoz por dirección IP*.
 - **¿Sin sonido?** Asegúrate de que el Firewall de Windows permite airhome en redes privadas y de que el altavoz no
   tiene contraseña de AirPlay. Los filtros de red (por ejemplo, el controlador de red de AdGuard) pueden bloquear la conexión.
-- **¿Importa el retardo (vídeo, juegos)?** Reduce el búfer. AirPlay siempre añade algo de retardo propio, así que
-  para vídeo con sincronía labial conviene un búfer pequeño.
+- **¿Importa el retardo (vídeo, juegos)?** Elige el modo **Vídeo** o **Juegos**: el retardo hasta el oído baja de unos 700 ms a unos 300 y 260 ms (medido con un búfer de 100 ms en un HomePod mini). Queda un poco, así que en un reproductor como VLC o MPC-HC adelanta el sonido aproximadamente esa cantidad.
 - **¿Cortes con Wi-Fi débil?** Aumenta el búfer.
 
 ## Estado

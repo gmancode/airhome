@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.9.13-0A84FF" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.9.21-0A84FF" alt="Version">
   <img src="https://img.shields.io/badge/Plattform-Windows%2010%20%7C%2011-0078D4" alt="Plattform">
   <img src="https://img.shields.io/badge/Lizenz-GPL--3.0--or--later-blue" alt="Lizenz">
   <img src="https://img.shields.io/badge/geschrieben%20in-Rust-orange" alt="Rust">
@@ -42,8 +42,7 @@ Windows kann seinen Ton nicht von Haus aus an einen HomePod senden. airhome erg�
 - **Ein Klick, keine Treiber.** Keine virtuelle Soundkarte, kein Bonjour, kein iTunes. Lautsprecher wählen, verbinden.
 - **Ton nur dort, wo du ihn willst.** Beim Streamen werden die PC-Lautsprecher stummgeschaltet und danach wiederhergestellt
   – auch wenn das Programm unerwartet beendet wird.
-- **Mehrere Lautsprecher gleichzeitig.** Tippe bei weiteren Lautsprechern auf **+**, um alle synchron abzuspielen, jeder
-  mit eigener Lautstärke *(experimentell)*.
+- **Mehrere Lautsprecher gleichzeitig.** Schalte *Auf mehreren Lautsprechern spielen* ein, hake die gewünschten Lautsprecher an, und sie spielen synchron, jeder mit eigener Lautstärke *(experimentell)*.
 - **Lebt im Tray.** Verbinden, trennen und Lautstärke ändern direkt im Tray-Menü, ohne das Fenster zu öffnen.
 - **Bleibt verbunden.** Automatische Wiederverbindung nach einem WLAN-Aussetzer, ein erneuter Versuch bei langsamem Start,
   ein Knopf zum Abbrechen einer zu langen Verbindung und eine Benachrichtigung, wenn bei verstecktem Fenster etwas schiefgeht.
@@ -58,7 +57,10 @@ Windows kann seinen Ton nicht von Haus aus an einen HomePod senden. airhome erg�
 | 🔊 **Systemton** | Erfasst alles, was Windows abspielt (WASAPI-Loopback), und sendet es als verschlüsseltes AirPlay-2-Audio |
 | 🏠 **HomePod-tauglich** | HomeKit-Transient-Pairing, präzise PTP-Zeitsynchronisation, funktioniert mit HomePod mini |
 | 🎚 **Lautstärke** | Gesamtlautstärke plus eigener Pegel für jeden Lautsprecher; auch über das Tray bedienbar |
-| ⏱ **Einstellbare Verzögerung** | Puffer von 100 bis 2000 ms: niedriger = direkter, höher = stabiler bei schwachem WLAN |
+| 🎛 **Musik / Video / Spiele** | Ein Schalter dafür, wie schnell der Lautsprecher spielt: Musik ist am stabilsten, Video und Spiele senken die Verzögerung auf weniger als die Hälfte (mit einem Mikrofon an einem HomePod mini gemessen) |
+| ⏱ **Einstellbarer Puffer** | Unter *Erweitert*: 100 bis 2000 ms, niedriger = direkter, höher = stabiler bei schwachem WLAN |
+| 😴 **Bei Stille trennen** | Optional: Nach 5 Minuten ohne Ton wird der Lautsprecher freigegeben und verbindet sich von selbst wieder, sobald Ton kommt |
+| 🩺 **Verbindung prüfen** | Ein Knopf, der die üblichen Ursachen für Stille sucht (Netzwerktyp, Programme, die die Verbindung blockieren, VPN-Adapter, belegte Ports) und sagt, was zu ändern ist |
 | 🔌 **Hinzufügen per IP und Port** | Für Netzwerke, in denen die automatische Suche nicht funktioniert (VLANs, manche Router) |
 | 🔁 **Automatische Wiederverbindung** | Holt den Stream nach einem Abbruch zurück; Verbinden lässt sich jederzeit abbrechen |
 | 🔔 **Benachrichtigungen** | Eine Windows-Benachrichtigung, wenn eine Verbindung scheitert, während airhome im Tray läuft |
@@ -103,7 +105,11 @@ AirPlay-Zugriff auf „Alle im selben Netzwerk“ und **kein AirPlay-Passwort** 
 | Lautsprecher dieses PCs beim Streamen stummschalten | Verhindert doppelten Ton; wird danach automatisch wiederhergestellt |
 | Schließen-Schaltfläche minimiert in den Infobereich | Hält airhome im Hintergrund am Laufen |
 | Lautsprecher per IP-Adresse hinzufügen | Fügt einen Lautsprecher manuell hinzu (IP und optionaler Port, Standard 7000) |
-| Puffer vor der Wiedergabe | Latenz-Regler, 100–2000 ms (gilt ab der nächsten Verbindung) |
+| Modus (Musik / Video / Spiele) | Wie schnell der Lautsprecher spielt; Video und Spiele senken die Verzögerung (gilt ab der nächsten Verbindung) |
+| Bei Stille trennen | Gibt den Lautsprecher nach 5 Minuten ohne Ton frei und verbindet sich wieder, sobald Ton kommt |
+| Verbindung prüfen | Testet Netzwerk, Ports, VPN-Adapter und Tonausgabe und kann einen Bericht kopieren |
+| Problem auf GitHub melden | Öffnet das Formular; hänge das Protokoll aus *Protokollordner öffnen* an |
+| Puffer vor der Wiedergabe (unter Erweitert) | Latenz-Regler, 100–2000 ms (gilt ab der nächsten Verbindung) |
 
 ## Tipps
 
@@ -111,8 +117,7 @@ AirPlay-Zugriff auf „Alle im selben Netzwerk“ und **kein AirPlay-Passwort** 
   Netzwerk die Suche, nutze *Lautsprecher per IP-Adresse hinzufügen*.
 - **Kein Ton?** Stelle sicher, dass die Windows-Firewall airhome in privaten Netzwerken erlaubt und der Lautsprecher kein
   AirPlay-Passwort hat. Netzwerkfilter (z. B. der Netzwerktreiber von AdGuard) können die Verbindung blockieren.
-- **Verzögerung wichtig (Video, Spiele)?** Verkleinere den Puffer. AirPlay bringt immer etwas eigene Verzögerung mit;
-  für lippensynchrones Video ist ein kleiner Puffer am besten.
+- **Verzögerung wichtig (Video, Spiele)?** Wähle den Modus **Video** oder **Spiele**: Die Verzögerung bis zum Ohr sinkt von etwa 700 ms auf etwa 300 und 260 ms (mit 100 ms Puffer an einem HomePod mini gemessen). Ein kleiner Rest bleibt, verschiebe den Ton daher in einem Player wie VLC oder MPC-HC um etwa diesen Wert nach vorn.
 - **Aussetzer bei schwachem WLAN?** Vergrößere den Puffer.
 
 ## Status

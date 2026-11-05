@@ -1,10 +1,12 @@
-﻿// No console window in release builds (logs go to %LOCALAPPDATA%\airhome\airhome.log).
+// No console window in release builds (logs go to %LOCALAPPDATA%\airhome\airhome.log).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 //! airhome: stream Windows system audio (WASAPI loopback) to a HomePod over AirPlay 2.
 
 mod autostart;
 mod capture;
+mod clipboard;
+mod diag;
 mod engine;
 mod i18n;
 mod notify;
@@ -197,6 +199,8 @@ struct Args {
     toast_test: bool,
     /// Developer switch: show made-up speakers (for screenshots without private names and addresses).
     demo_devices: bool,
+    /// Developer switch: open the "Check connection" panel at launch (screenshots, tests).
+    diag: bool,
 }
 
 fn parse_args() -> Args {
@@ -208,6 +212,8 @@ fn parse_args() -> Args {
             a.multi = true;
         } else if arg == "--demo-devices" {
             a.demo_devices = true;
+        } else if arg == "--diag" {
+            a.diag = true;
         } else if arg == "--toast-test" {
             a.toast_test = true;
         } else if let Some(p) = arg.strip_prefix("--page=") {
@@ -444,6 +450,33 @@ struct App {
     manual_port: String,
     manual_invalid: bool,
     manual_open: bool,
+    /// "Check connection": panel open, last result, the running check, and when "Copied" was shown.
+    diag_open: bool,
+    diag: Option<diag::Report>,
+    diag_rx: Option<std::sync::mpsc::Receiver<diag::Report>>,
+    diag_copied: Option<Instant>,
+    /// The speaker list under the speaker card is open.
+    speakers_open: bool,
+    /// "Play on several speakers" is on: the list shows checkboxes instead of round marks.
+    multi_mode: bool,
+    /// "Advanced" in the sound settings is open.
+    adv_open: bool,
+}
+
+/// Text under one finished check: advice for a problem, otherwise the short detail (or "OK").
+fn diag_text(l: Lang, it: &diag::Item) -> String {
+    use diag::{Check, Level};
+    match (it.check, it.level) {
+        (Check::Network, Level::Warn) => t(l, K::DiagNetworkWarn).to_string(),
+        (Check::Speaker, Level::Fail) => tf(l, K::DiagSpeakerFail, &it.detail),
+        (Check::Speaker, Level::Warn) => t(l, K::DiagSpeakerNone).to_string(),
+        (Check::Ports, Level::Fail) => t(l, K::DiagPortsFail).to_string(),
+        (Check::Adapters, Level::Warn) => tf(l, K::DiagAdaptersWarn, &it.detail),
+        (Check::Security, Level::Warn) => tf(l, K::DiagSecurityWarn, &it.detail),
+        (Check::Audio, Level::Fail) => t(l, K::DiagAudioFail).to_string(),
+        (_, Level::Ok) if !it.detail.is_empty() => it.detail.clone(),
+        _ => t(l, K::DiagOk).to_string(),
+    }
 }
 
 impl App {
@@ -481,7 +514,10 @@ impl App {
                 ctx.request_repaint();
             });
         }
-        Self {
+        let open_diag = args.diag;
+        engine::SILENCE_STANDBY.store(settings.silence_standby, Ordering::Relaxed);
+        engine::LATENCY_MIN_SAMPLES.store(settings.speaker_latency_samples(), Ordering::Relaxed);
+        let mut app = Self {
             engine: Engine::spawn(cc.egui_ctx.clone(), settings.manual_ips.clone()),
             tray,
             devices: Vec::new(),
@@ -508,8 +544,20 @@ impl App {
             manual_port: String::new(),
             manual_invalid: false,
             manual_open: false,
+            diag_open: false,
+            diag: None,
+            diag_rx: None,
+            diag_copied: None,
+            speakers_open: true,
+            multi_mode: !settings.group.is_empty(),
+            adv_open: false,
             settings,
+        };
+        if open_diag {
+            app.diag_open = true;
+            app.start_diag(&cc.egui_ctx);
         }
+        app
     }
 
     fn show_window(&mut self, ctx: &egui::Context) {
@@ -532,11 +580,37 @@ impl App {
         matches!(self.status, Status::Streaming(_))
     }
 
+    /// "Disconnect when silent" released the speaker; the stream returns by itself when sound does.
+    fn standby(&self) -> bool {
+        matches!(self.status, Status::Standby(_))
+    }
+
     fn busy(&self) -> bool {
         matches!(self.status, Status::Scanning | Status::Connecting(_) | Status::Reconnecting(..) | Status::Stopping)
     }
 
+    /// Runs the connection check in the background (it asks Windows, which takes a second or two).
+    fn start_diag(&mut self, ctx: &egui::Context) {
+        let addr = self.selected.and_then(|i| self.devices.get(i)).and_then(|d| engine::parse_addr(&d.ip));
+        // While connecting or streaming, airhome itself holds the time-sync ports.
+        let streaming = self.streaming() || self.connecting();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(diag::run(addr, streaming));
+            ctx.request_repaint();
+        });
+        self.diag = None;
+        self.diag_rx = Some(rx);
+    }
+
     fn poll_events(&mut self) {
+        if let Some(rx) = &self.diag_rx {
+            if let Ok(report) = rx.try_recv() {
+                self.diag = Some(report);
+                self.diag_rx = None;
+            }
+        }
         while let Ok(ev) = self.engine.events.try_recv() {
             match ev {
                 Event::Devices(list) => {
@@ -671,7 +745,7 @@ impl App {
 
     /// Start, or stop — a connection attempt in progress counts as "running" and can be cancelled.
     fn toggle(&mut self) {
-        if self.streaming() || self.connecting() {
+        if self.streaming() || self.connecting() || self.standby() {
             self.engine.send(Cmd::Stop);
         } else if !self.busy() {
             self.start();
@@ -697,6 +771,7 @@ impl App {
             Status::Connecting(n) => (tf(l, K::Connecting, n), WARN),
             Status::Streaming(n) => (tf(l, K::Streaming, n), GOOD),
             Status::Reconnecting(n, _) => (tf(l, K::Reconnecting, n), WARN),
+            Status::Standby(n) => (tf(l, K::StandbyStatus, n), TEXT2),
             Status::Stopping => (t(l, K::Stopping).to_string(), TEXT2),
             Status::ConnectionLost => (format!("{}: {}", t(l, K::Error), t(l, K::ConnectionLost)), BAD),
             Status::Error(e) => (format!("{}: {e}", t(l, K::Error)), BAD),
@@ -710,7 +785,7 @@ impl App {
             Status::Connecting(_) | Status::Reconnecting(..) | Status::Scanning | Status::Stopping => TrayState::Busy,
             _ => TrayState::Idle,
         };
-        let stop_mode = self.streaming() || self.connecting();
+        let stop_mode = self.streaming() || self.connecting() || self.standby();
         let can_toggle = stop_mode || (!self.busy() && self.selected.is_some());
         if let Some(tr) = self.tray.as_mut() {
             tr.update(state, &format!("airhome — {text}"), can_toggle, stop_mode);
@@ -727,17 +802,15 @@ impl App {
         let streaming = self.streaming();
         let busy = self.busy();
         let members = self.member_indices();
-        let (name, sub) = match self.selected.and_then(|i| self.devices.get(i)) {
-            Some(d) if members.is_empty() => (d.name.clone(), format!("{} · {}", d.model, d.ip)),
-            Some(d) => {
-                let mut names = vec![d.name.as_str()];
-                names.extend(members.iter().filter_map(|&i| self.devices.get(i)).map(|x| x.name.as_str()));
-                (tf(l, K::SpeakersCount, &(members.len() + 1).to_string()), names.join(" + "))
-            }
-            None => (t(l, K::NoSpeaker).to_string(), String::new()),
+        // Just the name (model and address are only useful when hunting a problem): "Name" or "Name + 2".
+        let name = match self.selected.and_then(|i| self.devices.get(i)) {
+            Some(d) if members.is_empty() => d.name.clone(),
+            Some(d) => format!("{} + {}", d.name, members.len()),
+            None => t(l, K::NoSpeaker).to_string(),
         };
         let connecting = self.connecting();
-        let can_act = streaming || connecting || (!busy && self.selected.is_some());
+        let standby = self.standby();
+        let can_act = streaming || connecting || standby || (!busy && self.selected.is_some());
 
         let outline = if streaming { GOOD.gamma_multiply(0.55) } else { border() };
         card_with(ui, 12, outline, |ui| {
@@ -748,10 +821,10 @@ impl App {
             // Wrapped status text decides the height.
             let status_g = ui.painter().layout(status_text, regular(13.0), status_color, text_w - 16.0);
             let line_h = 13.0 * 1.35;
-            let h = (status_g.size().y + 4.0 + 24.0 + 2.0 + 14.0).max(btn_d + 8.0);
+            let h = (status_g.size().y + 4.0 + 24.0 + 4.0).max(btn_d + 8.0);
             let (rect, _) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
 
-            let top = rect.top() + (h - (status_g.size().y + 4.0 + 24.0 + 2.0 + 14.0)).max(0.0) * 0.5;
+            let top = rect.top() + (h - (status_g.size().y + 4.0 + 24.0 + 4.0)).max(0.0) * 0.5;
             let p = ui.painter().clone();
             p.circle_filled(pos2(rect.left() + 4.5, top + line_h * 0.5), 4.0, status_color);
             let status_h = status_g.size().y;
@@ -760,15 +833,14 @@ impl App {
             let clip = Rect::from_min_size(rect.min, vec2(text_w, h));
             let pc = p.with_clip_rect(clip);
             pc.text(pos2(rect.left(), top + status_h + 4.0 + 12.0), Align2::LEFT_CENTER, name, bold(19.0), TEXT);
-            pc.text(pos2(rect.left(), top + status_h + 4.0 + 24.0 + 2.0 + 7.0), Align2::LEFT_CENTER, sub, regular(12.0), TEXT2);
 
             let btn_rect = Rect::from_center_size(pos2(rect.right() - btn_d * 0.5, rect.center().y), vec2(btn_d, btn_d));
-            let color = if streaming || connecting { BAD } else { GOOD };
+            let color = if streaming || connecting || standby { BAD } else { GOOD };
             let kind = if connecting {
                 ActionKind::Cancel
             } else if busy {
                 ActionKind::Busy
-            } else if streaming {
+            } else if streaming || standby {
                 ActionKind::Stop
             } else {
                 ActionKind::Play
@@ -784,66 +856,32 @@ impl App {
 
     fn page_main(&mut self, ui: &mut egui::Ui) {
         let l = self.lang;
-        let streaming = self.streaming();
-        let busy = self.busy();
 
         self.hero(ui);
         ui.add_space(10.0);
 
-        // ---- speakers ----
-        section_row(ui, t(l, K::Speakers), |ui| {
-            if refresh_button(ui, !streaming && !busy) {
-                self.engine.send(Cmd::Scan);
+        // ---- mode: how soon the speaker plays (Music / Video / Games) ----
+        card(ui, 12, |ui| {
+            ui.label(RichText::new(t(l, K::ModeTitle)).font(regular(14.5)).color(TEXT));
+            ui.add_space(6.0);
+            let mut mode = self.settings.mode();
+            if segmented(ui, "latency_mode", &[t(l, K::ModeMusic), t(l, K::ModeVideo), t(l, K::ModeGames)], &mut mode) {
+                self.settings.latency_mode = mode as u8;
+                self.save_settings();
+                engine::LATENCY_MIN_SAMPLES.store(self.settings.speaker_latency_samples(), Ordering::Relaxed);
+            }
+            ui.add_space(6.0);
+            let hint = match self.settings.mode() {
+                0 => K::ModeMusicHint,
+                1 => K::ModeVideoHint,
+                _ => K::ModeGamesHint,
+            };
+            let est = self.settings.estimated_delay_ms().to_string();
+            ui.label(RichText::new(tf(l, hint, &est)).font(regular(12.5)).color(TEXT2));
+            if self.streaming() {
+                ui.label(RichText::new(t(l, K::LatHint)).font(regular(12.0)).color(TEXT2.gamma_multiply(0.8)));
             }
         });
-        // Rows stay clickable while streaming: choosing another speaker restarts the stream on it.
-        let enabled = !busy;
-        card(ui, 4, |ui| {
-            if self.devices.is_empty() {
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
-                let msg = if busy { t(l, K::Searching) } else { t(l, K::NoDevices) };
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, regular(14.0), TEXT2);
-            }
-            let n = self.devices.len();
-            for i in 0..n {
-                let d = &self.devices[i];
-                let sub = format!("{} · {}", d.model, d.ip);
-                let is_main = self.selected == Some(i);
-                let is_member = !is_main && self.settings.group.contains(&d.name);
-                let dname = d.name.clone();
-                match device_row(ui, &d.name, &sub, d.is_homepod, is_main, is_member, enabled) {
-                    RowAction::Select => {
-                        self.selected = Some(i);
-                        self.settings.group.retain(|n| n != &dname); // the main speaker is not also a member
-                        self.save_settings();
-                        if streaming && !is_main {
-                            self.restart_pending = true;
-                            self.engine.send(Cmd::Stop);
-                        }
-                    }
-                    RowAction::ToggleMember => {
-                        if is_member {
-                            self.settings.group.retain(|n| n != &dname);
-                        } else {
-                            self.settings.group.push(dname);
-                        }
-                        self.save_settings();
-                        if streaming {
-                            self.restart_pending = true; // the group changed: reconnect with the new members
-                            self.engine.send(Cmd::Stop);
-                        }
-                    }
-                    RowAction::None => {}
-                }
-                if i + 1 < n {
-                    divider(ui);
-                }
-            }
-        });
-        if self.devices.len() > 1 && self.settings.group.is_empty() {
-            ui.add_space(4.0);
-            ui.label(RichText::new(t(l, K::GroupHint)).font(regular(12.0)).color(TEXT2));
-        }
         ui.add_space(10.0);
 
         // ---- volume + PC level (one card) ----
@@ -859,27 +897,6 @@ impl App {
                 self.save_settings();
                 self.push_volumes();
             }
-            // Several speakers: each one also gets its own level (on top of the main volume above).
-            let names = self.group_names();
-            if names.len() > 1 {
-                for name in names {
-                    let mut trim = self.settings.speaker_trim.get(&name).copied().unwrap_or(1.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&name).font(regular(12.5)).color(TEXT2));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(format!("{:.0}%", trim * 100.0)).font(regular(12.5)).color(TEXT2));
-                        });
-                    });
-                    let st = slider(ui, &format!("trim-{name}"), &mut trim);
-                    if st.changed {
-                        self.settings.speaker_trim.insert(name.clone(), trim);
-                    }
-                    if st.released {
-                        self.save_settings();
-                        self.push_volumes();
-                    }
-                }
-            }
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(t(l, K::PcLevel)).font(regular(12.5)).color(TEXT2));
@@ -889,58 +906,135 @@ impl App {
                 ui.label(RichText::new(format!("{}: {}", t(l, K::Source), self.source)).font(regular(11.5)).color(TEXT2));
             }
         });
+        ui.add_space(10.0);
+
+        self.speakers_card(ui);
+    }
+
+    /// Speaker card: the chosen speaker and, when there are several, a list that opens below it. One round mark
+    /// picks a single speaker; with "play on several speakers" on, the marks become checkboxes and every checked
+    /// speaker gets its own level.
+    fn speakers_card(&mut self, ui: &mut egui::Ui) {
+        let l = self.lang;
+        let streaming = self.streaming();
+        let busy = self.busy();
+        let many = self.devices.len() > 1;
+        let open = many && self.speakers_open;
+        let enabled = !busy;
+
+        let (shown_name, is_homepod) = match self.selected.and_then(|i| self.devices.get(i)) {
+            Some(d) => {
+                let extra = self.member_indices().len();
+                (if extra > 0 { format!("{} + {}", d.name, extra) } else { d.name.clone() }, d.is_homepod)
+            }
+            None => ((if busy { t(l, K::Searching) } else { t(l, K::NoDevices) }).to_string(), true),
+        };
+
+        card(ui, 4, |ui| {
+            let (toggled, rescan) =
+                speaker_header(ui, t(l, K::SpeakerOne), &shown_name, is_homepod, many.then_some(open), Some(!streaming && !busy));
+            if rescan {
+                self.engine.send(Cmd::Scan);
+            }
+            if toggled {
+                self.speakers_open = !self.speakers_open;
+            }
+            if !open {
+                return;
+            }
+            divider(ui);
+            if toggle_row(ui, t(l, K::PlayMulti), Some(t(l, K::PlayMultiSub)), &mut self.multi_mode)
+                && !self.multi_mode
+                && !self.settings.group.is_empty()
+            {
+                // Back to a single speaker: drop the extra ones.
+                self.settings.group.clear();
+                self.save_settings();
+                if streaming {
+                    self.restart_pending = true;
+                    self.engine.send(Cmd::Stop);
+                }
+            }
+            divider(ui);
+            let n = self.devices.len();
+            for i in 0..n {
+                let dname = self.devices[i].name.clone();
+                let homepod = self.devices[i].is_homepod;
+                let is_main = self.selected == Some(i);
+                let is_member = !is_main && self.settings.group.contains(&dname);
+                let checked = is_main || is_member;
+                let multi = self.multi_mode;
+                let badge = (multi && is_main && !self.settings.group.is_empty()).then(|| t(l, K::MainBadge));
+                if speaker_row(ui, &dname, homepod, checked, multi, badge, enabled) {
+                    let mut changed = false;
+                    if !multi {
+                        if !is_main {
+                            self.selected = Some(i);
+                            self.settings.group.retain(|n| n != &dname); // the main speaker is not also a member
+                            changed = true;
+                        }
+                    } else if is_main {
+                        // Unchecking the main speaker: the first other checked speaker becomes the main one.
+                        let next = self.settings.group.iter().find_map(|g| self.devices.iter().position(|d| &d.name == g));
+                        if let Some(pos) = next {
+                            let next_name = self.devices[pos].name.clone();
+                            self.selected = Some(pos);
+                            self.settings.group.retain(|n| n != &next_name);
+                            changed = true;
+                        }
+                    } else if is_member {
+                        self.settings.group.retain(|n| n != &dname);
+                        changed = true;
+                    } else {
+                        self.settings.group.push(dname.clone());
+                        changed = true;
+                    }
+                    if changed {
+                        self.save_settings();
+                        if streaming {
+                            self.restart_pending = true; // the choice changed: reconnect with the new speakers
+                            self.engine.send(Cmd::Stop);
+                        }
+                    }
+                }
+                // Several speakers: each one also gets its own level (on top of the main volume).
+                if multi && checked {
+                    let mut trim = self.settings.speaker_trim.get(&dname).copied().unwrap_or(1.0);
+                    egui::Frame::new().inner_margin(Margin { left: 14, right: 14, top: 0, bottom: 6 }).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(t(l, K::OwnVolume)).font(regular(12.0)).color(TEXT2));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new(format!("{:.0}%", trim * 100.0)).font(regular(12.0)).color(TEXT2));
+                            });
+                        });
+                        let st = slider(ui, &format!("trim-{dname}"), &mut trim);
+                        if st.changed {
+                            self.settings.speaker_trim.insert(dname.clone(), trim);
+                        }
+                        if st.released {
+                            self.save_settings();
+                            self.push_volumes();
+                        }
+                    });
+                }
+                ui.add_space(2.0);
+            }
+        });
     }
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
         let l = self.lang;
         let ctx = ui.ctx().clone();
 
-        // ---- general ----
+        // ---- connection ----
+        section_row(ui, t(l, K::SecConnection), |_| {});
         card(ui, 4, |ui| {
-            // language: label on the left, compact dropdown on the right
-            egui::Frame::new().inner_margin(Margin::symmetric(14, 5)).show(ui, |ui| {
-                ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(t(l, K::Language)).font(regular(14.5)).color(TEXT));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.allocate_ui_with_layout(vec2(150.0, 36.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                            let names: Vec<&str> = Lang::ALL.iter().map(|c| c.native_name()).collect();
-                            let cur = Lang::ALL.iter().position(|c| *c == self.lang).unwrap_or(0);
-                            if let Some(i) = dropdown(ui, "lang", &names, cur) {
-                                self.set_language(&ctx, Lang::ALL[i]);
-                            }
-                        });
-                    });
-                });
-            });
-            divider(ui);
-            if toggle_row(ui, t(l, K::AutoStart), None, &mut self.autostart) {
-                if let Err(e) = autostart::set(self.autostart) {
-                    tracing::error!("autostart change failed: {e}");
-                    self.autostart = autostart::is_enabled();
-                }
-            }
-            divider(ui);
             // Say *which* speaker this refers to, so it can never be a surprise.
             let saved = self.settings.device.clone();
             if toggle_row(ui, t(l, K::AutoConnect), saved.as_deref(), &mut self.settings.auto_connect) {
                 self.save_settings();
             }
             divider(ui);
-            if toggle_row(ui, t(l, K::MutePc), None, &mut self.settings.mute_pc) {
-                self.save_settings();
-                if self.streaming() {
-                    self.engine.send(Cmd::SetMutePc(self.settings.mute_pc)); // takes effect immediately
-                }
-            }
-            divider(ui);
-            if toggle_row(ui, t(l, K::CloseToTray), None, &mut self.settings.close_to_tray) {
-                self.save_settings();
-            }
-        });
-        ui.add_space(10.0);
-
-        // ---- speakers added by IP ----
-        card(ui, 4, |ui| {
             let title = if self.settings.manual_ips.is_empty() {
                 t(l, K::ManualTitle).to_string()
             } else {
@@ -949,10 +1043,8 @@ impl App {
             if nav_row(ui, &title) {
                 self.manual_open = !self.manual_open;
             }
-            if !self.manual_open {
-                return;
-            }
-            divider(ui);
+            if self.manual_open {
+                divider(ui);
             egui::Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
             ui.label(RichText::new(t(l, K::ManualHint)).font(regular(12.5)).color(TEXT2));
@@ -1052,11 +1144,31 @@ impl App {
                 self.engine.send(Cmd::Scan);
             }
             });
+            }
+            divider(ui);
+            if toggle_row(ui, t(l, K::SilenceStandby), Some(t(l, K::SilenceStandbyHint)), &mut self.settings.silence_standby) {
+                self.save_settings();
+                engine::SILENCE_STANDBY.store(self.settings.silence_standby, Ordering::Relaxed);
+            }
         });
         ui.add_space(10.0);
 
-        // ---- latency ----
-        card(ui, 12, |ui| {
+        // ---- sound ----
+        section_row(ui, t(l, K::SecSound), |_| {});
+        card(ui, 4, |ui| {
+            if toggle_row(ui, t(l, K::MutePc), None, &mut self.settings.mute_pc) {
+                self.save_settings();
+                if self.streaming() {
+                    self.engine.send(Cmd::SetMutePc(self.settings.mute_pc)); // takes effect immediately
+                }
+            }
+            divider(ui);
+            if nav_row(ui, t(l, K::Advanced)) {
+                self.adv_open = !self.adv_open;
+            }
+            if self.adv_open {
+                divider(ui);
+                egui::Frame::new().inner_margin(Margin::symmetric(14, 10)).show(ui, |ui| {
             const MIN_MS: f32 = 100.0;
             const MAX_MS: f32 = 2000.0;
             let ms = self.settings.latency_ms as f32;
@@ -1085,11 +1197,120 @@ impl App {
             if self.streaming() {
                 ui.label(RichText::new(t(l, K::LatHint)).font(regular(12.0)).color(TEXT2.gamma_multiply(0.8)));
             }
+                });
+            }
         });
         ui.add_space(10.0);
 
-        // ---- files + about (one card) ----
+        // ---- app ----
+        section_row(ui, t(l, K::SecApp), |_| {});
         card(ui, 4, |ui| {
+            // language: label on the left, compact dropdown on the right
+            egui::Frame::new().inner_margin(Margin::symmetric(14, 5)).show(ui, |ui| {
+                ui.allocate_ui_with_layout(vec2(ui.available_width(), 36.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(t(l, K::Language)).font(regular(14.5)).color(TEXT));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.allocate_ui_with_layout(vec2(150.0, 36.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                            let names: Vec<&str> = Lang::ALL.iter().map(|c| c.native_name()).collect();
+                            let cur = Lang::ALL.iter().position(|c| *c == self.lang).unwrap_or(0);
+                            if let Some(i) = dropdown(ui, "lang", &names, cur) {
+                                self.set_language(&ctx, Lang::ALL[i]);
+                            }
+                        });
+                    });
+                });
+            });
+            divider(ui);
+            if toggle_row(ui, t(l, K::AutoStart), None, &mut self.autostart) {
+                if let Err(e) = autostart::set(self.autostart) {
+                    tracing::error!("autostart change failed: {e}");
+                    self.autostart = autostart::is_enabled();
+                }
+            }
+            divider(ui);
+            if toggle_row(ui, t(l, K::CloseToTray), None, &mut self.settings.close_to_tray) {
+                self.save_settings();
+            }
+        });
+        ui.add_space(10.0);
+
+        // ---- help ----
+        section_row(ui, t(l, K::SecHelp), |_| {});
+        card(ui, 4, |ui| {
+            if nav_row(ui, t(l, K::DiagTitle)) {
+                self.diag_open = !self.diag_open;
+                if self.diag_open && self.diag.is_none() && self.diag_rx.is_none() {
+                    self.start_diag(&ctx);
+                }
+            }
+            if self.diag_open {
+                divider(ui);
+            let report = self.diag.clone();
+            let (mut run_again, mut copy) = (false, false);
+            egui::Frame::new().inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                let Some(report) = report else {
+                    ui.label(RichText::new(t(l, K::DiagRunning)).font(regular(13.0)).color(TEXT2));
+                    ui.ctx().request_repaint_after(Duration::from_millis(200));
+                    return;
+                };
+                for it in &report.items {
+                    let label = match it.check {
+                        diag::Check::Network => K::DiagNetwork,
+                        diag::Check::Speaker => K::DiagSpeaker,
+                        diag::Check::Ports => K::DiagPorts,
+                        diag::Check::Adapters => K::DiagAdapters,
+                        diag::Check::Security => K::DiagSecurity,
+                        diag::Check::Audio => K::DiagAudio,
+                    };
+                    let color = match it.level {
+                        diag::Level::Ok => GOOD,
+                        diag::Level::Warn => WARN,
+                        diag::Level::Fail => BAD,
+                    };
+                    let text = diag_text(l, it);
+                    ui.horizontal(|ui| {
+                        dot(ui, color);
+                        ui.label(RichText::new(t(l, label)).font(regular(14.0)).color(TEXT));
+                    });
+                    ui.label(RichText::new(text).font(regular(12.5)).color(TEXT2));
+                }
+                if !report.all_ok() {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(t(l, K::DiagHint)).font(regular(12.5)).color(TEXT2.gamma_multiply(0.85)));
+                }
+                ui.add_space(6.0);
+                let copied = self.diag_copied.is_some_and(|at| at.elapsed() < Duration::from_secs(2));
+                if pill_button(ui, if copied { t(l, K::DiagCopied) } else { t(l, K::DiagCopy) }) {
+                    copy = true;
+                }
+                if pill_button(ui, t(l, K::DiagRun)) {
+                    run_again = true;
+                }
+                if copied {
+                    ui.ctx().request_repaint_after(Duration::from_millis(500));
+                }
+            });
+            if copy {
+                // Only say "Copied" when Windows really took the text.
+                if let Some(r) = &self.diag {
+                    if clipboard::set_text(&r.text()) {
+                        self.diag_copied = Some(Instant::now());
+                    }
+                }
+            }
+            if run_again {
+                self.start_diag(&ctx);
+            }
+            }
+            divider(ui);
+            if nav_row(ui, t(l, K::ReportProblem)) {
+                // Opens the issue form in the browser; the user attaches the log file themselves.
+                let _ = std::process::Command::new("explorer")
+                    .arg("https://github.com/gmancode/airhome/issues/new/choose")
+                    .spawn();
+            }
+            divider(ui);
             if nav_row(ui, t(l, K::OpenLogs)) {
                 open_folder(settings::log_dir());
             }
@@ -1182,21 +1403,24 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG).inner_margin(Margin { left: 20, right: 20, top: 18, bottom: 0 }))
             .show(ui, |ui| {
-                // ---- header ----
+                // ---- header: logo and the settings gear; on the settings screen a back arrow and the title ----
                 ui.horizontal(|ui| {
-                    logo(ui, 30.0);
-                    ui.label(RichText::new("airhome").font(bold(21.0)).color(TEXT));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).font(regular(12.0)).color(TEXT2));
-                    });
+                    if self.page == Page::Settings {
+                        if header_icon_button(ui, true) {
+                            self.page = Page::Main;
+                        }
+                        ui.label(RichText::new(t(l, K::TabSettings)).font(bold(21.0)).color(TEXT));
+                    } else {
+                        logo(ui, 30.0);
+                        ui.label(RichText::new("airhome").font(bold(21.0)).color(TEXT));
+                        ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).font(regular(11.5)).color(TEXT2));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if header_icon_button(ui, false) {
+                                self.page = Page::Settings;
+                            }
+                        });
+                    }
                 });
-                ui.add_space(6.0);
-
-                // ---- tabs ----
-                let mut tab = if self.page == Page::Main { 0 } else { 1 };
-                if segmented(ui, "tabs", &[t(l, K::TabMain), t(l, K::TabSettings)], &mut tab) {
-                    self.page = if tab == 0 { Page::Main } else { Page::Settings };
-                }
                 ui.add_space(10.0);
 
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
